@@ -36,17 +36,6 @@ class MA5Strategy(bt.Strategy):
                 'status': order.status
             }
 
-        if order.status in [order.Completed]:
-            # 订单已完成（完全成交）
-            if order.isbuy():
-                print(f"买入订单成交: 价格 {order.executed.price:.2f}, 数量 {order.executed.size}, 时间 {num2date(self.data.datetime[0])}")
-            elif order.issell():
-                print(f"卖出订单成交: 价格 {order.executed.price:.2f}, 数量 {order.executed.size}, 时间 {num2date(self.data.datetime[0])}")
-        
-        elif order.status in [order.Canceled, order.Margin, order.Rejected, order.Expired]:
-            # 订单被取消、保证金不足、被拒绝或过期
-            print(f"订单未成交: {order.Status[order.status]}")
-
     def get_order_info(self, order_id):
         """根据订单ID查询订单信息"""
         return self.order_dict.get(order_id, None)

@@ -57,6 +57,10 @@ class T1Broker(bt.brokers.BackBroker):
                     today_buys += execution['size']
         
         if today_buys > 0:
+            # 如果尝试卖出当天买入成交的股票，打印提醒日志
+            current_datetime = num2date(data.datetime[0])
+            print(f"T+1限制提醒: {current_datetime} {data_name} 有 {today_buys} 股当天买入成交的股票无法当天卖出")
+
             # 如果当天有买入成交，则限制卖出数量
             position = self.getposition(data)
             # 可用卖出数量为持仓量减去当日买入成交量
@@ -66,12 +70,6 @@ class T1Broker(bt.brokers.BackBroker):
             if available_size % 100 != 0:
                 available_size = (available_size // 100) * 100
                 print(f"可用卖出数量调整为100的倍数: {available_size}")
-            
-            # 如果尝试卖出当天买入成交的股票，打印提醒日志
-            restricted_size = min(size, today_buys)
-            if restricted_size > 0:
-                current_datetime = num2date(data.datetime[0])
-                print(f"T+1限制提醒: {current_datetime} {data_name} 有 {restricted_size} 股当天买入成交的股票无法当天卖出")
             
             if available_size <= 0:
                 # 如果没有可卖数量，返回无效订单
@@ -85,25 +83,29 @@ class T1Broker(bt.brokers.BackBroker):
         )
 
     def notify(self, order):
-        # 处理订单状态更新
-        super(T1Broker, self).notify(order)
+        data_name = order.data._name or 'default'
+        execution_date = num2date(order.data.datetime[0])
 
         if order.status in [order.Completed]:
-            data_name = order.data._name or 'default'
-            execution_date = num2date(order.data.datetime[0])
             # 订单已完成（完全成交）
             if order.isbuy():
-
                 # 初始化该标的的买入成交记录列表
                 if data_name not in self._buy_executions:
                     self._buy_executions[data_name] = []
 
                 # 添加买入成交记录
                 self._buy_executions[data_name].append({
-                    'date': execution_date,
+                    'date': order.data.datetime.date(0),
                     'size': order.executed.size,
                     'price': order.executed.price
                 })
-                print(f"买入订单成交: 价格 {order.executed.price:.2f}, 数量 {order.executed.size}, 时间 {execution_date}")
+                print(f"买入订单ID({order.ref})成交: 价格({order.executed.price:.2f}), 数量({order.executed.size}), 时间({execution_date})")
             elif order.issell():
-                print(f"卖出订单成交: 价格 {order.executed.price:.2f}, 数量 {order.executed.size}, 时间 {execution_date}")
+                print(f"卖出订单ID({order.ref})成交: 价格({order.executed.price:.2f}), 数量({order.executed.size}), 时间({execution_date})")
+        elif order.status in [order.Canceled, order.Margin, order.Rejected, order.Expired]:
+            # 订单被取消、保证金不足、被拒绝或过期
+            print(f"订单ID({order.ref})未成交:{order.Status[order.status]}")
+
+
+        # 处理订单状态更新
+        super(T1Broker, self).notify(order)
