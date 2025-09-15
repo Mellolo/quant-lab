@@ -129,7 +129,7 @@ class MA5Strategy(bt.Strategy):
         
         elif order.status in [order.Canceled, order.Margin, order.Rejected, order.Expired]:
             # 订单被取消、保证金不足、被拒绝或过期
-            #print(f"订单未成交: {order.Status[order.status]}")
+            print(f"订单未成交: {order.Status[order.status]}")
             self.order_dict[order.ref] = {
                 'type': 'buy' if order.isbuy() else 'sell',
                 'price': order.price,
