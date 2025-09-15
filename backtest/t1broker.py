@@ -11,18 +11,38 @@ class T1Broker(bt.brokers.BackBroker):
             exectype=None, valid=None, tradeid=0, oco=None,
             trailamount=None, trailpercent=None,
             **kwargs):
+        # 检查买入数量是否是100的倍数
+        if size % 100 != 0:
+            print(f"买入数量必须是100的倍数，当前数量: {size}，已调整为: {size - (size % 100)}")
+            size = size - (size % 100)
+            
+            # 如果调整后数量为0，则不执行买入
+            if size <= 0:
+                print("买入数量不足100股，无法买入")
+                return None
+        
         # 执行买入操作
         order = super(T1Broker, self).buy(
             owner, data, size, price, plimit, exectype, valid, tradeid, oco,
             trailamount, trailpercent, **kwargs
         )
-
+        
         return order
 
     def sell(self, owner, data, size, price=None, plimit=None,
              exectype=None, valid=None, tradeid=0, oco=None,
              trailamount=None, trailpercent=None,
              **kwargs):
+        # 检查卖出数量是否是100的倍数
+        if size % 100 != 0:
+            print(f"卖出数量必须是100的倍数，当前数量: {size}，已调整为: {size - (size % 100)}")
+            size = size - (size % 100)
+            
+            # 如果调整后数量为0，则不执行卖出
+            if size <= 0:
+                print("卖出数量不足100股，无法卖出")
+                return None
+        
         # 检查是否可以卖出
         # 根据T+1规则，当天买入成交的股票不能当天卖出
         data_name = data._name or 'default'
@@ -42,6 +62,11 @@ class T1Broker(bt.brokers.BackBroker):
             # 可用卖出数量为持仓量减去当日买入成交量
             available_size = max(0, position.size - today_buys)
             
+            # 再次检查调整后的可用数量是否是100的倍数
+            if available_size % 100 != 0:
+                available_size = (available_size // 100) * 100
+                print(f"可用卖出数量调整为100的倍数: {available_size}")
+            
             # 如果尝试卖出当天买入成交的股票，打印提醒日志
             restricted_size = min(size, today_buys)
             if restricted_size > 0:
@@ -50,10 +75,8 @@ class T1Broker(bt.brokers.BackBroker):
             
             if available_size <= 0:
                 # 如果没有可卖数量，返回无效订单
-                return super(T1Broker, self).sell(
-                    owner, data, 0, price, plimit, exectype, valid, tradeid, oco,
-                    trailamount, trailpercent, **kwargs
-                )
+                print("没有可卖出的股票")
+                return None
         
         # 执行卖出操作
         return super(T1Broker, self).sell(
