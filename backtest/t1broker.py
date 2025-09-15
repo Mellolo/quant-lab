@@ -87,20 +87,23 @@ class T1Broker(bt.brokers.BackBroker):
     def notify(self, order):
         # 处理订单状态更新
         super(T1Broker, self).notify(order)
-        
-        # 只有在订单完全成交时才记录买入成交记录
-        if order.status == order.Completed and order.isbuy():
+
+        if order.status in [order.Completed]:
             data_name = order.data._name or 'default'
-            execution_date = order.data.datetime.date(0)
-            
-            # 初始化该标的的买入成交记录列表
-            if data_name not in self._buy_executions:
-                self._buy_executions[data_name] = []
-            
-            # 添加买入成交记录
-            self._buy_executions[data_name].append({
-                'date': execution_date,
-                'size': order.executed.size,
-                'price': order.executed.price
-            })
-            print(f"broker买入成交记录: {order.data.datetime.datetime(0)} {order.data._name} {order.executed.size} 股")
+            execution_date = num2date(order.data.datetime[0])
+            # 订单已完成（完全成交）
+            if order.isbuy():
+
+                # 初始化该标的的买入成交记录列表
+                if data_name not in self._buy_executions:
+                    self._buy_executions[data_name] = []
+
+                # 添加买入成交记录
+                self._buy_executions[data_name].append({
+                    'date': execution_date,
+                    'size': order.executed.size,
+                    'price': order.executed.price
+                })
+                print(f"买入订单成交: 价格 {order.executed.price:.2f}, 数量 {order.executed.size}, 时间 {execution_date}")
+            elif order.issell():
+                print(f"卖出订单成交: 价格 {order.executed.price:.2f}, 数量 {order.executed.size}, 时间 {execution_date}")
