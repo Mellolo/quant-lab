@@ -2,77 +2,7 @@ import backtrader as bt
 from backtrader.utils.date import num2date
 import pandas as pd
 from datetime import datetime
-
-# 自定义broker，实现A股T+1交易规则
-class T1Broker(bt.brokers.BackBroker):
-    def __init__(self):
-        super(T1Broker, self).__init__()
-        self._buy_orders = {}  # 记录买入订单的日期
-
-    def buy(self, owner, data, size, price=None, plimit=None,
-            exectype=None, valid=None, tradeid=0, oco=None,
-            trailamount=None, trailpercent=None,
-            **kwargs):
-        # 执行买入操作
-        order = super(T1Broker, self).buy(
-            owner, data, size, price, plimit, exectype, valid, tradeid, oco,
-            trailamount, trailpercent, **kwargs
-        )
-        
-        # 记录买入订单的日期
-        data_name = data._name or 'default'
-        if data_name not in self._buy_orders:
-            self._buy_orders[data_name] = []
-            
-        self._buy_orders[data_name].append({
-            'date': data.datetime.date(0),
-            'size': abs(size),  # 确保为正数
-            'price': price or data.close[0]
-        })
-        
-        return order
-
-    def sell(self, owner, data, size, price=None, plimit=None,
-             exectype=None, valid=None, tradeid=0, oco=None,
-             trailamount=None, trailpercent=None,
-             **kwargs):
-        # 检查是否可以卖出
-        # 根据T+1规则，当天买入的股票不能当天卖出
-        data_name = data._name or 'default'
-        current_date = data.datetime.date(0)
-        available_size = size
-        
-        # 计算当天买入的股票数量（不能卖出）
-        today_buys = 0
-        if data_name in self._buy_orders:
-            for order in self._buy_orders[data_name]:
-                if order['date'] == current_date:
-                    today_buys += order['size']
-        
-        if today_buys > 0:
-            # 如果当天有买入，则限制卖出数量
-            position = self.getposition(data)
-            # 可用卖出数量为持仓量减去当日买入量
-            available_size = max(0, position.size - today_buys)
-            
-            # 如果尝试卖出当天买入的股票，打印提醒日志
-            restricted_size = min(size, today_buys)
-            if restricted_size > 0:
-                current_datetime = num2date(data.datetime[0])
-                print(f"T+1限制提醒: {current_datetime} {data_name} 有 {restricted_size} 股当天买入的股票无法当天卖出")
-            
-            if available_size <= 0:
-                # 如果没有可卖数量，返回无效订单
-                return super(T1Broker, self).sell(
-                    owner, data, 0, price, plimit, exectype, valid, tradeid, oco,
-                    trailamount, trailpercent, **kwargs
-                )
-        
-        # 执行卖出操作
-        return super(T1Broker, self).sell(
-            owner, data, available_size, price, plimit, exectype, valid, tradeid, oco,
-            trailamount, trailpercent, **kwargs
-        )
+from backtest.t1broker import T1Broker
 
 # 定义策略类
 class MA5Strategy(bt.Strategy):
