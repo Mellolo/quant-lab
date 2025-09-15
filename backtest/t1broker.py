@@ -103,3 +103,4 @@ class T1Broker(bt.brokers.BackBroker):
                 'size': order.executed.size,
                 'price': order.executed.price
             })
+            print(f"broker买入成交记录: {order.data.datetime.date(0)} {order.data._name} {order.executed.size} 股")

@@ -33,40 +33,19 @@ class MA5Strategy(bt.Strategy):
                 'price': order.executed.price,
                 'size': order.executed.size,
                 'datetime': num2date(self.data.datetime[0]),
-                'status': 'completed'
+                'status': order.status
             }
 
         if order.status in [order.Completed]:
             # 订单已完成（完全成交）
             if order.isbuy():
                 print(f"买入订单成交: 价格 {order.executed.price:.2f}, 数量 {order.executed.size}, 时间 {num2date(self.data.datetime[0])}")
-                self.order_dict[order.ref] = {
-                    'type': 'buy',
-                    'price': order.executed.price,
-                    'size': order.executed.size,
-                    'datetime': num2date(self.data.datetime[0]),
-                    'status': 'completed'
-                }
             elif order.issell():
                 print(f"卖出订单成交: 价格 {order.executed.price:.2f}, 数量 {order.executed.size}, 时间 {num2date(self.data.datetime[0])}")
-                self.order_dict[order.ref] = {
-                    'type': 'sell',
-                    'price': order.executed.price,
-                    'size': order.executed.size,
-                    'datetime': num2date(self.data.datetime[0]),
-                    'status': 'completed'
-                }
         
         elif order.status in [order.Canceled, order.Margin, order.Rejected, order.Expired]:
             # 订单被取消、保证金不足、被拒绝或过期
             print(f"订单未成交: {order.Status[order.status]}")
-            self.order_dict[order.ref] = {
-                'type': 'buy' if order.isbuy() else 'sell',
-                'price': order.price,
-                'size': order.size,
-                'datetime': num2date(self.data.datetime[0]),
-                'status': order.Status[order.status]
-            }
 
     def get_order_info(self, order_id):
         """根据订单ID查询订单信息"""
@@ -75,15 +54,6 @@ class MA5Strategy(bt.Strategy):
     def next(self):
         # 获取当前具体时间
         current_time = num2date(self.data.datetime[0])
-        
-        # 播报仓位信息
-        # position = self.getposition()
-        # print(f"\n=== 仓位信息 ===")
-        # print(f"时间: {current_time}")
-        # print(f"当前持仓数量: {position.size}")
-        # print(f"当前持仓成本: {position.price:.2f}")
-        # print(f"当前账户价值: {self.broker.getvalue():.2f}")
-        # print(f"可用资金: {self.broker.getcash():.2f}")
         
         # 展示历史未完成订单信息
         # pending_orders = [order for order in self.order_dict.values()
