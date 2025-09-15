@@ -84,9 +84,9 @@ class T1Broker(bt.brokers.BackBroker):
             trailamount, trailpercent, **kwargs
         )
 
-    def notify_order(self, order):
+    def notify(self, order):
         # 处理订单状态更新
-        super(T1Broker, self).notify_order(order)
+        super(T1Broker, self).notify(order)
         
         # 只有在订单完全成交时才记录买入成交记录
         if order.status == order.Completed and order.isbuy():
@@ -103,4 +103,4 @@ class T1Broker(bt.brokers.BackBroker):
                 'size': order.executed.size,
                 'price': order.executed.price
             })
-            print(f"broker买入成交记录: {order.data.datetime.date(0)} {order.data._name} {order.executed.size} 股")
+            print(f"broker买入成交记录: {order.data.datetime.datetime(0)} {order.data._name} {order.executed.size} 股")

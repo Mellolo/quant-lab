@@ -26,12 +26,12 @@ class MA5Strategy(bt.Strategy):
 
     def notify_order(self, order):
         if order.status in [order.Created, order.Submitted, order.Accepted]:
-            print(f"订单已发送: Order ID{order.ref} Order Status {order.status} 价格 {order.executed.price:.2f}, 数量 {order.executed.size}, 时间 {num2date(self.data.datetime[0])}")
-            # 订单已提交/已接受，但尚未成交
             self.order_dict[order.ref] = {
                 'type': 'buy' if order.isbuy() else 'sell',
-                'price': order.executed.price,
-                'size': order.executed.size,
+                'created_price': order.created.price,
+                'created_size': order.created.size,
+                'executed_price': order.executed.price,
+                'executed_size': order.executed.size,
                 'datetime': num2date(self.data.datetime[0]),
                 'status': order.status
             }
@@ -94,12 +94,14 @@ class MA5Strategy(bt.Strategy):
         # 检查是否是交叉点
         if self.crossover > 0:  # 上穿
             order = self.buy()  # 保存订单引用
-            print(f'BUY CREATE, Order status: {order.status}, Price: {self.data.close[0]:.2f}, Date: {current_time}, Order ID: {order.ref}')
+            if order:
+                print(f'BUY CREATE, Order status: {order.status}, Price: {self.data.close[0]:.2f}, Date: {current_time}, Order ID: {order.ref}')
         
         elif self.crossover < 0:  # 下穿
             if self.position:  # 只有在有持仓时才卖出
                 order = self.sell()  # 保存订单引用
-                print(f'SELL CREATE, Order status: {order.status}, Price: {self.data.close[0]:.2f}, Date: {current_time}, Order ID: {order.ref}')
+                if order:
+                    print(f'SELL CREATE, Order status: {order.status}, Price: {self.data.close[0]:.2f}, Date: {current_time}, Order ID: {order.ref}')
 
 def main():
     # 创建Cerebro引擎
@@ -117,7 +119,7 @@ def main():
     
     # 创建数据源（5分钟级别）
     data = bt.feeds.PandasData(dataname=data_df,
-                               fromdate=datetime(2025, 9, 1),
+                               fromdate=datetime(2025, 8, 1),
                                todate=datetime(2025, 9, 12))
     
     # 添加数据到引擎
