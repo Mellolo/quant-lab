@@ -58,7 +58,7 @@ class T1Broker(bt.brokers.BackBroker):
         
         if today_buys > 0:
             # 如果尝试卖出当天买入成交的股票，打印提醒日志
-            current_datetime = num2date(data.datetime[0])
+            current_datetime = data.datetime.datetime(0)
             print(f"T+1限制提醒: {current_datetime} {data_name} 有 {today_buys} 股当天买入成交的股票无法当天卖出")
 
             # 如果当天有买入成交，则限制卖出数量
@@ -84,7 +84,7 @@ class T1Broker(bt.brokers.BackBroker):
 
     def notify(self, order):
         data_name = order.data._name or 'default'
-        execution_date = num2date(order.data.datetime[0])
+        execution_date = order.data.datetime.datetime(0)
 
         if order.status in [order.Completed]:
             # 订单已完成（完全成交）
