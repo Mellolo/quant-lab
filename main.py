@@ -54,9 +54,6 @@ class MA5Strategy(bt.Strategy):
             # 检查是否是交叉点
             if self.crossover[data] > 0:  # 上穿
                 order = self.buy(data=data)  # 保存订单引用
-                if order:
-                    log_backtest(data,
-                                 f'{data_name} 买入订单ID({order.ref})发送, 订单状态: {order.status}, 价格: {data.close[0]:.2f}')
             
             elif self.crossover[data] < 0:  # 下穿
                 position = self.getposition(data)
