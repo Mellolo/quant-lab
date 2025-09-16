@@ -54,14 +54,14 @@ class MA5Strategy(bt.Strategy):
             if self.crossover[data] > 0:  # 上穿
                 order = self.buy(data=data)  # 保存订单引用
                 if order:
-                    print(f'{data_name} 买入订单ID({order.ref})发送, 订单状态: {order.status}, 价格: {data.close[0]:.2f}, 时间: {current_time}')
+                    print(f'{current_time} -- {data_name} 买入订单ID({order.ref})发送, 订单状态: {order.status}, 价格: {data.close[0]:.2f}')
             
             elif self.crossover[data] < 0:  # 下穿
                 position = self.getposition(data)
                 if position:  # 只有在有持仓时才卖出
                     order = self.sell(data=data)  # 保存订单引用
                     if order:
-                        print(f'{data_name} 卖出订单ID({order.ref})发送, 订单状态: {order.status}, 价格: {data.close[0]:.2f}, 时间: {current_time}')
+                        print(f'{current_time} -- {data_name} 卖出订单ID({order.ref})发送, 订单状态: {order.status}, 价格: {data.close[0]:.2f}')
 
 def main():
     # 创建Cerebro引擎
