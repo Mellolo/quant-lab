@@ -47,21 +47,15 @@ class MA5Strategy(bt.Strategy):
     def next(self):
         # 遍历所有数据源（标的）
         for i, data in enumerate(self.datas):
-            # 获取当前具体时间
-            current_time = num2date(data.datetime[0])
-            data_name = data._name or f'data_{i}'
-            
+            print(f"{data._name}: {data.datetime.datetime(0)} close:{data.close[0]}")
             # 检查是否是交叉点
             if self.crossover[data] > 0:  # 上穿
-                order = self.buy(data=data)  # 保存订单引用
+                self.buy(data=data)  # 保存订单引用
             
             elif self.crossover[data] < 0:  # 下穿
                 position = self.getposition(data)
                 if position:  # 只有在有持仓时才卖出
-                    order = self.sell(data=data)  # 保存订单引用
-                    if order:
-                        log_backtest(data,
-                                     f'{data_name} 卖出订单ID({order.ref})发送, 订单状态: {order.status}, 价格: {data.close[0]:.2f}')
+                    self.sell(data=data)  # 保存订单引用
 
 def main():
     # 创建Cerebro引擎
@@ -89,8 +83,8 @@ def main():
             
             # 创建数据源（5分钟级别）
             data = bt.feeds.PandasData(dataname=data_df,
-                                       fromdate=datetime(2025, 8, 1),
-                                       todate=datetime(2025, 9, 12),
+                                       # fromdate=datetime(2025, 5, 5),
+                                       # todate=datetime(2025, 9, 12),
                                        name=symbol)
             
             # 添加数据到引擎
