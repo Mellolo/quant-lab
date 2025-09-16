@@ -3,6 +3,7 @@ from backtrader.utils.date import num2date
 import pandas as pd
 from datetime import datetime
 from backtest.t1broker import T1Broker
+import os
 
 # 定义策略类
 class MA5Strategy(bt.Strategy):
@@ -11,15 +12,17 @@ class MA5Strategy(bt.Strategy):
     )
 
     def __init__(self):
-        # 初始化移动平均线指标
-        self.ma48 = bt.indicators.SimpleMovingAverage(
-            self.datas[0], period=self.params.ma_period)
+        # 为每个数据源初始化移动平均线指标和交叉检测指标
+        self.ma48 = {}
+        self.crossover = {}
         
-        # 使用backtrader自带的交叉检测指标
-        self.crossover = bt.indicators.CrossOver(self.data.close, self.ma48)
-        
-        # 用于记录当天是否已经交易过
-        self.last_trade_date = None
+        for i, data in enumerate(self.datas):
+            # 初始化移动平均线指标
+            self.ma48[data] = bt.indicators.SimpleMovingAverage(
+                data, period=self.params.ma_period)
+            
+            # 使用backtrader自带的交叉检测指标
+            self.crossover[data] = bt.indicators.CrossOver(data.close, self.ma48[data])
         
         # 用于存储订单信息
         self.order_dict = {}  # 用于存储订单ID和订单信息的字典
@@ -32,7 +35,7 @@ class MA5Strategy(bt.Strategy):
                 'created_size': order.created.size,
                 'executed_price': order.executed.price,
                 'executed_size': order.executed.size,
-                'datetime': num2date(self.data.datetime[0]),
+                'datetime': num2date(order.data.datetime[0]),
                 'status': order.status
             }
 
@@ -41,56 +44,24 @@ class MA5Strategy(bt.Strategy):
         return self.order_dict.get(order_id, None)
 
     def next(self):
-        # 获取当前具体时间
-        current_time = num2date(self.data.datetime[0])
-        
-        # 展示历史未完成订单信息
-        # pending_orders = [order for order in self.order_dict.values()
-        #                  if order['status'] in ['Submitted', 'Accepted']]
-        #
-        # print(f"\n=== 未完成订单 ===")
-        # if pending_orders:
-        #     for i, order in enumerate(pending_orders):
-        #         price = order['price'] if order['price'] is not None else 0
-        #         print(f"{i+1}. {order['type']} - 价格: {price:.2f}, 数量: {order['size']}, 时间: {order['datetime']}, 状态: {order['status']}")
-        # else:
-        #     print("暂无未完成订单")
-        #
-        # print("=" * 30)
-
-        # 获取过去几根K线的数据
-        # 索引0表示当前K线，-1表示前一根K线，-2表示前两根K线，以此类推
-        current_close = self.data.close[0]      # 当前收盘价
-        previous_close = self.data.close[-1]    # 前一根K线收盘价
-        two_ago_close = self.data.close[-2]     # 前两根K线收盘价
-        
-        current_open = self.data.open[0]        # 当前开盘价
-        previous_open = self.data.open[-1]      # 前一根K线开盘价
-        
-        current_high = self.data.high[0]        # 当前最高价
-        previous_high = self.data.high[-1]      # 前一根K线最高价
-        
-        current_low = self.data.low[0]          # 当前最低价
-        previous_low = self.data.low[-1]        # 前一根K线最低价
-        
-        # 打印示例数据
-        # print(f"时间: {current_time}")
-        # print(f"当前K线 - 开盘价: {current_open:.2f}, 收盘价: {current_close:.2f}, 最高价: {current_high:.2f}, 最低价: {current_low:.2f}")
-        # print(f"前一根K线 - 开盘价: {previous_open:.2f}, 收盘价: {previous_close:.2f}, 最高价: {previous_high:.2f}, 最低价: {previous_low:.2f}")
-        # print(f"前两根K线 - 收盘价: {two_ago_close:.2f}")
-        # print("-" * 50)
-        
-        # 检查是否是交叉点
-        if self.crossover > 0:  # 上穿
-            order = self.buy()  # 保存订单引用
-            if order:
-                print(f'BUY CREATE, Order status: {order.status}, Price: {self.data.close[0]:.2f}, Date: {current_time}, Order ID: {order.ref}')
-        
-        elif self.crossover < 0:  # 下穿
-            if self.position:  # 只有在有持仓时才卖出
-                order = self.sell()  # 保存订单引用
+        # 遍历所有数据源（标的）
+        for i, data in enumerate(self.datas):
+            # 获取当前具体时间
+            current_time = num2date(data.datetime[0])
+            data_name = data._name or f'data_{i}'
+            
+            # 检查是否是交叉点
+            if self.crossover[data] > 0:  # 上穿
+                order = self.buy(data=data)  # 保存订单引用
                 if order:
-                    print(f'SELL CREATE, Order status: {order.status}, Price: {self.data.close[0]:.2f}, Date: {current_time}, Order ID: {order.ref}')
+                    print(f'{data_name} 买入订单ID({order.ref})发送, 订单状态: {order.status}, 价格: {data.close[0]:.2f}, 时间: {current_time}')
+            
+            elif self.crossover[data] < 0:  # 下穿
+                position = self.getposition(data)
+                if position:  # 只有在有持仓时才卖出
+                    order = self.sell(data=data)  # 保存订单引用
+                    if order:
+                        print(f'{data_name} 卖出订单ID({order.ref})发送, 订单状态: {order.status}, 价格: {data.close[0]:.2f}, 时间: {current_time}')
 
 def main():
     # 创建Cerebro引擎
@@ -99,20 +70,32 @@ def main():
     # 添加策略
     cerebro.addstrategy(MA5Strategy)
     
-    # 读取prices.csv数据（5分钟级别数据）
-    data_df = pd.read_csv('prices.csv')
-    
-    # 将第一列设为时间索引
-    data_df['datetime'] = pd.to_datetime(data_df.iloc[:, 0])
-    data_df.set_index('datetime', inplace=True)
-    
-    # 创建数据源（5分钟级别）
-    data = bt.feeds.PandasData(dataname=data_df,
-                               fromdate=datetime(2025, 8, 1),
-                               todate=datetime(2025, 9, 12))
-    
-    # 添加数据到引擎
-    cerebro.adddata(data)
+    # 读取test目录下的所有数据文件
+    test_dir = 'test'
+    if os.path.exists(test_dir):
+        data_files = [f for f in os.listdir(test_dir) if f.endswith('.csv')]
+        
+        for data_file in data_files:
+            file_path = os.path.join(test_dir, data_file)
+            # 读取数据
+            data_df = pd.read_csv(file_path)
+            
+            # 将第一列设为时间索引
+            data_df['datetime'] = pd.to_datetime(data_df.iloc[:, 0])
+            data_df.set_index('datetime', inplace=True)
+            
+            # 获取股票代码作为数据名称
+            symbol = data_file.replace('.csv', '')
+            
+            # 创建数据源（5分钟级别）
+            data = bt.feeds.PandasData(dataname=data_df,
+                                       fromdate=datetime(2025, 8, 1),
+                                       todate=datetime(2025, 9, 12),
+                                       name=symbol)
+            
+            # 添加数据到引擎
+            cerebro.adddata(data)
+            print(f'已加载数据: {symbol}')
     
     # 设置自定义broker
     cerebro.broker = T1Broker()
@@ -123,8 +106,8 @@ def main():
     # 设置佣金 - 0.1%
     cerebro.broker.setcommission(commission=0.001)
     
-    # 设置仓位大小
-    cerebro.addsizer(bt.sizers.PercentSizer, percents=99)
+    # 设置仓位大小 - 每个标的使用可用资金的相等份额
+    cerebro.addsizer(bt.sizers.PercentSizer, percents=99 // len(cerebro.datas) if cerebro.datas else 99)
     
     # 添加分析指标
     cerebro.addanalyzer(bt.analyzers.SharpeRatio, _name='sharpe')
