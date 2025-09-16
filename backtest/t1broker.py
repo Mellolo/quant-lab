@@ -60,7 +60,7 @@ class T1Broker(bt.brokers.BackBroker):
             # 可用卖出数量为持仓量减去当日买入成交量
             available_size = max(0, position.size - today_buys)
             # 如果尝试卖出当天买入成交的股票，打印提醒日志
-            messages.append(f"T+1限制提醒: {data_name} 有 {today_buys} 股当天买入成交后无法卖出，实际可卖出数量: {available_size}, 本订单卖出数量调整为:{min(size, available_size)}")
+            messages.append(f"T+1限制提醒，{today_buys}股当天买入成交后无法卖出，实际可卖出数量: {available_size}, 本订单卖出数量调整为:{min(size, available_size)}")
             size = min(size, available_size)
 
         # 检查卖出数量是否是100的倍数
@@ -70,7 +70,8 @@ class T1Broker(bt.brokers.BackBroker):
 
         # 如果调整后数量为0，则不执卖出
         if size <= 0:
-            messages.append("，卖出数量不足100股，无法卖出")
+            messages.append("卖出数量不足100股，无法卖出")
+            self.log(data, "，".join(messages))
             return None
         
         # 执行卖出操作
