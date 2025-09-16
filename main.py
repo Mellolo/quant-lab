@@ -3,7 +3,7 @@ from backtrader.utils.date import num2date
 import pandas as pd
 from datetime import datetime
 from backtest.t1broker import T1Broker
-from backtest.logger import log_backtest
+from backtest.feeds import data_check
 import os
 
 # 定义策略类
@@ -73,9 +73,9 @@ def main():
             file_path = os.path.join(test_dir, data_file)
             # 读取数据
             data_df = pd.read_csv(file_path)
+            data_check(data_df)
             
             # 将第一列设为时间索引
-            data_df['datetime'] = pd.to_datetime(data_df.iloc[:, 0])
             data_df.set_index('datetime', inplace=True)
             
             # 获取股票代码作为数据名称
