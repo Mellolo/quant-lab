@@ -3,19 +3,22 @@ from backtrader.feeds import PandasData
 import pandas as pd
 from typing import List, Tuple, Union, Dict
 
-def data_feed_astock(dfs: Dict[str, pd.DataFrame], start_date: datetime.date, end_date: datetime.date) -> List[PandasData]:
+def data_feed_astock(dfs: Dict[str, pd.DataFrame], start_date: str, end_date: str, freq: str) -> List[PandasData]:
+    start_date = pd.to_datetime(start_date)
+    end_date = pd.to_datetime(end_date) + datetime.timedelta(days=1)
+
     # 必需字段（注意第一列是索引列，不在columns中）
     required_fields = {'open', 'close', 'high', 'low', 'volume', 'datetime'}
 
     # 检查每个DataFrame是否包含必需字段
-    for symbol, df in dfs.values():
+    for symbol, df in dfs.items():
         missing_fields = required_fields - set(df.columns)
         if missing_fields:
             raise ValueError(f"DataFrame {symbol} 缺少以下必需字段: {missing_fields}")
 
     # 处理每个DataFrame:转换datetime为datetime格式并设置为index
     processed_dfs = {}
-    for symbol, df in dfs.values():
+    for symbol, df in dfs.items():
         # 复制DataFrame避免修改原始数据
         df_copy = df.copy()
 
@@ -25,11 +28,11 @@ def data_feed_astock(dfs: Dict[str, pd.DataFrame], start_date: datetime.date, en
         # 设置datetime为索引
         df_copy.set_index('datetime', inplace=True)
 
-        df_copy = df_copy.iloc[start_date <= df_copy.index <= end_date, :]
+        df_copy = df_copy.iloc[(start_date <= df_copy.index) & (df_copy.index <= end_date), :]
 
         # 按索引排序
         df_copy.sort_index(inplace=True)
-        validate_datetime_index(df_copy.index, [("09:30", "11:30"), ("13:00", "15:00")], "5m")
+        validate_datetime_index(df_copy.index, [("09:30", "11:30"), ("13:00", "15:00")], freq)
 
         processed_dfs[symbol] = df_copy
 
@@ -59,17 +62,17 @@ def validate_datetime_index(index: pd.Index, trading_periods: List[Tuple[str, st
 
     # 检查实际索引是否包含所有预期的时间点
     if not index.equals(expected_index):
-        messages = ["数据索引无效"]
+        messages = [f"数据索引在{freq}频率下的当前交易时段{trading_periods}无效"]
 
         missing_times = expected_index.difference(index)
         if len(missing_times) > 0:
-            messages.append(f"缺少以下时间点：{missing_times}")
+            messages.append("缺少时间点")
 
         extra_times = index.difference(expected_index)
         if len(extra_times) > 0:
-            messages.append(f"存在多余的时间点：{extra_times}")
+            messages.append(f"存在多余的时间点")
 
-        raise ValueError(f"数据索引无效，缺少以下时间点：{missing_times}")
+        raise ValueError(",".join(messages))
 
     return True
 
