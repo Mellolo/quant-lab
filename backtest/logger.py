@@ -26,7 +26,7 @@ class BacktestLogger:
         """
         data_name = data._name or 'default'
         current_time = data.datetime.datetime(0)
-        log_message = f"[{current_time}] [{data_name}] {message}"
+        log_message = f"[{data_name}] [{current_time}] {message}"
         if source:
             log_message = f"[{source}] {log_message}"
         self.logger.log(level, log_message)
