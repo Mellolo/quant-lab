@@ -62,17 +62,7 @@ def validate_datetime_index(index: pd.Index, trading_periods: List[Tuple[str, st
 
     # 检查实际索引是否包含所有预期的时间点
     if not index.equals(expected_index):
-        messages = [f"数据索引在{freq}频率下的当前交易时段{trading_periods}无效"]
-
-        missing_times = expected_index.difference(index)
-        if len(missing_times) > 0:
-            messages.append("缺少时间点")
-
-        extra_times = index.difference(expected_index)
-        if len(extra_times) > 0:
-            messages.append(f"存在多余的时间点")
-
-        raise ValueError(",".join(messages))
+        raise ValueError(f"数据索引在{freq}频率下的当前交易时段{trading_periods}无效，请检查数据")
 
     return True
 
