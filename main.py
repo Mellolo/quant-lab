@@ -4,7 +4,7 @@ import backtrader as bt
 from backtrader.utils.date import num2date
 import pandas as pd
 from backtest.t1broker import T1Broker
-from backtest.feeds import data_feed_astock
+from backtest.feeds.astock import data_feed_astock
 import os
 
 # 定义策略类
