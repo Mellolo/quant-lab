@@ -18,12 +18,12 @@ class T1Broker(bt.brokers.BackBroker):
         messages = []
         # 检查买入数量是否是100的倍数
         if size % 100 != 0:
-            messages.append(f"买入数量必须是100的倍数，当前数量: {size}，已调整为: {(size // 100) * 100}")
+            messages.append(f"买入数量调整为100的倍数({size:.2f}->{(size // 100) * 100})")
             size = (size // 100) * 100
             
         # 如果调整后数量为0，则不执行买入
         if size <= 0:
-            messages.insert(0, "买入订单无法发送（数量为0）")
+            messages.insert(0, "买入订单无法发送(数量为0)")
             self.log(data, "，".join(messages))
             return None
         
@@ -33,7 +33,7 @@ class T1Broker(bt.brokers.BackBroker):
             trailamount, trailpercent, **kwargs
         )
 
-        messages.insert(0, f'买入订单({order.ref})发送, 价格: {price}')
+        messages.insert(0, f'买入订单({order.ref})发送，价格: {price if price else '市价'}，数量: {size}')
         self.log(data, "，".join(messages))
         
         return order
@@ -59,18 +59,19 @@ class T1Broker(bt.brokers.BackBroker):
             position = self.getposition(data)
             # 可用卖出数量为持仓量减去当日买入成交量
             available_size = max(0, position.size - today_buys)
-            # 如果尝试卖出当天买入成交的股票，打印提醒日志
-            messages.append(f"T+1限制提醒，{today_buys}股当天买入成交后无法卖出，实际可卖出数量: {available_size}, 本订单卖出数量调整为:{min(size, available_size)}")
-            size = min(size, available_size)
+            if size > available_size:
+                # 如果尝试卖出当天买入成交的股票，打印提醒日志
+                messages.append(f"T+1限制提醒，{today_buys}股当天买入成交后无法卖出，卖出数量调整为实际可卖出数量({size:.2f}->{available_size})")
+                size = available_size
 
         # 检查卖出数量是否是100的倍数
         if size % 100 != 0:
-            messages.append(f"卖出数量必须是100的倍数，当前数量: {size}，已调整为: {(size // 100) * 100}")
+            messages.append(f"卖出数量调整为100的倍数({size:.2f}->{(size // 100) * 100})")
             size = (size // 100) * 100
 
         # 如果调整后数量为0，则不执卖出
         if size <= 0:
-            messages.insert(0, "卖出订单无法发送（数量为0）")
+            messages.insert(0, "卖出订单无法发送(数量为0)")
             self.log(data, "，".join(messages))
             return None
         
@@ -80,7 +81,7 @@ class T1Broker(bt.brokers.BackBroker):
             trailamount, trailpercent, **kwargs
         )
 
-        messages.insert(0, f'卖出订单({order.ref})发送, 价格: {price}')
+        messages.insert(0, f'卖出订单({order.ref})发送，价格: {price if price else '市价'}，数量: {size}')
         self.log(data, "，".join(messages))
 
         return order
@@ -102,13 +103,13 @@ class T1Broker(bt.brokers.BackBroker):
                     'price': order.executed.price
                 })
                 self.log(order.data,
-                             f"买入订单ID({order.ref})成交: 价格({order.executed.price:.2f}), 数量({order.executed.size}))")
+                             f"买入订单({order.ref})成交: 价格({order.executed.price:.2f}), 数量({order.executed.size})")
             elif order.issell():
                 self.log(order.data,
-                             f"卖出订单ID({order.ref})成交: 价格({order.executed.price:.2f}), 数量({order.executed.size}))")
+                             f"卖出订单({order.ref})成交: 价格({order.executed.price:.2f}), 数量({order.executed.size})")
         elif order.status in [order.Canceled, order.Margin, order.Rejected, order.Expired]:
             # 订单被取消、保证金不足、被拒绝或过期
-            self.log(order.data, f"订单ID({order.ref})未成交:{order.Status[order.status]}")
+            self.log(order.data, f"订单({order.ref})未成交:{order.Status[order.status]}")
 
         # 处理订单状态更新
         super(T1Broker, self).notify(order)
