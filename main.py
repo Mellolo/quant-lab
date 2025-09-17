@@ -1,9 +1,10 @@
+import datetime
+
 import backtrader as bt
 from backtrader.utils.date import num2date
 import pandas as pd
-from datetime import datetime
 from backtest.t1broker import T1Broker
-from backtest.feeds import data_check
+from backtest.feeds import data_feed_astock
 import os
 
 # 定义策略类
@@ -47,7 +48,6 @@ class MA5Strategy(bt.Strategy):
     def next(self):
         # 遍历所有数据源（标的）
         for i, data in enumerate(self.datas):
-            print(f"{data._name}: {data.datetime.datetime(0)} close:{data.close[0]}")
             # 检查是否是交叉点
             if self.crossover[data] > 0:  # 上穿
                 self.buy(data=data)  # 保存订单引用
@@ -66,6 +66,7 @@ def main():
     
     # 读取test目录下的所有数据文件
     test_dir = 'test'
+    df_dict = {}
     if os.path.exists(test_dir):
         data_files = [f for f in os.listdir(test_dir) if f.endswith('.csv')]
         
@@ -73,23 +74,16 @@ def main():
             file_path = os.path.join(test_dir, data_file)
             # 读取数据
             data_df = pd.read_csv(file_path)
-            data_check(data_df)
-            
-            # 将第一列设为时间索引
-            data_df.set_index('datetime', inplace=True)
             
             # 获取股票代码作为数据名称
             symbol = data_file.replace('.csv', '')
-            
-            # 创建数据源（5分钟级别）
-            data = bt.feeds.PandasData(dataname=data_df,
-                                       # fromdate=datetime(2025, 5, 5),
-                                       # todate=datetime(2025, 9, 12),
-                                       name=symbol)
-            
-            # 添加数据到引擎
-            cerebro.adddata(data)
-            print(f'已加载数据: {symbol}')
+
+            df_dict[symbol] = data_df
+
+    datas = data_feed_astock(df_dict, datetime.date(2025, 8, 1), datetime.date(2025, 8, 15))
+    # 添加数据到引擎
+    for data in datas:
+        cerebro.adddata(data)
     
     # 设置自定义broker
     cerebro.broker = T1Broker()
