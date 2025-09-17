@@ -80,7 +80,7 @@ def main():
 
             df_dict[symbol] = data_df
 
-    datas = data_feed_astock(df_dict, "2025-08-01", "2025-08-15", "15m")
+    datas = data_feed_astock(df_dict, datetime.date(2025, 8, 1), datetime.date(2025, 8, 15), "5m")
     # 添加数据到引擎
     for data in datas:
         cerebro.adddata(data)

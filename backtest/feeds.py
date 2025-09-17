@@ -3,9 +3,9 @@ from backtrader.feeds import PandasData
 import pandas as pd
 from typing import List, Tuple, Union, Dict
 
-def data_feed_astock(dfs: Dict[str, pd.DataFrame], start_date: str, end_date: str, freq: str) -> List[PandasData]:
-    start_date = pd.to_datetime(start_date)
-    end_date = pd.to_datetime(end_date) + datetime.timedelta(days=1)
+def data_feed_astock(dfs: Dict[str, pd.DataFrame], start_date: datetime.date, end_date: datetime.date, freq: str) -> List[PandasData]:
+    start_datetime = pd.to_datetime(start_date)
+    end_datetime = pd.to_datetime(end_date) + datetime.timedelta(days=1)
 
     # 必需字段（注意第一列是索引列，不在columns中）
     required_fields = {'open', 'close', 'high', 'low', 'volume', 'datetime'}
@@ -28,26 +28,26 @@ def data_feed_astock(dfs: Dict[str, pd.DataFrame], start_date: str, end_date: st
         # 设置datetime为索引
         df_copy.set_index('datetime', inplace=True)
 
-        df_copy = df_copy.iloc[(start_date <= df_copy.index) & (df_copy.index <= end_date), :]
+        df_copy = df_copy.iloc[(start_datetime <= df_copy.index) & (df_copy.index < end_datetime), :]
 
         # 按索引排序
         df_copy.sort_index(inplace=True)
-        validate_datetime_index(df_copy.index, [("09:30", "11:30"), ("13:00", "15:00")], freq)
+        _validate_datetime_index(df_copy.index, [("09:30", "11:30"), ("13:00", "15:00")], freq)
 
         processed_dfs[symbol] = df_copy
 
     # 检查所有DataFrame的索引是否完全一致
-    # if processed_dfs:
-    #     keys = processed_dfs.keys()
-    #     first_index = processed_dfs[keys[0]].index
-    #     for i, df in enumerate(processed_df_list[1:], start=1):
-    #         if not first_index.equals(df.index):
-    #             raise ValueError(f"DataFrame {i} 的索引与 DataFrame 0 的索引不匹配")
+    if processed_dfs:
+        keys = list(processed_dfs.keys())
+        first_index = processed_dfs[keys[0]].index
+        for key in keys[1:]:
+            if not first_index.equals(processed_dfs[key].index):
+                raise ValueError(f"DataFrame {key} 的索引与 DataFrame {keys[0]} 的索引不匹配")
 
-    return [PandasData(dataname=df, fromdate=start_date, todate=end_date, symbol=symbol) for symbol, df in processed_dfs]
+    return [PandasData(dataname=df, fromdate=start_date, todate=end_date, name=symbol) for symbol, df in processed_dfs.items()]
 
 
-def validate_datetime_index(index: pd.Index, trading_periods: List[Tuple[str, str]], freq: str) -> bool:
+def _validate_datetime_index(index: pd.Index, trading_periods: List[Tuple[str, str]], freq: str) -> bool:
     # 生成预期的完整时间序列
     # 获取索引中实际存在的日期并去重
     unique_dates = sorted(set([d.date().strftime('%Y-%m-%d') for d in index]))
