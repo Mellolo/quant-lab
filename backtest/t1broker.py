@@ -23,7 +23,7 @@ class T1Broker(bt.brokers.BackBroker):
             
         # 如果调整后数量为0，则不执行买入
         if size <= 0:
-            messages.append("买入数量不足100股，无法卖出")
+            messages.insert(0, "买入订单无法发送（数量为0）")
             self.log(data, "，".join(messages))
             return None
         
@@ -70,7 +70,7 @@ class T1Broker(bt.brokers.BackBroker):
 
         # 如果调整后数量为0，则不执卖出
         if size <= 0:
-            messages.append("卖出数量不足100股，无法卖出")
+            messages.insert(0, "卖出订单无法发送（数量为0）")
             self.log(data, "，".join(messages))
             return None
         
