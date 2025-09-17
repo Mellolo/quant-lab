@@ -33,7 +33,7 @@ class T1Broker(bt.brokers.BackBroker):
             trailamount, trailpercent, **kwargs
         )
 
-        messages.insert(0, f'买入订单({order.ref})发送，价格: {price if price else '市价'}，数量: {size}')
+        messages.insert(0, f'买入订单({order.ref})发送，价格: {price if price else f'市价参考({data.close[0]})'}，数量: {size}')
         self.log(data, "，".join(messages))
         
         return order
@@ -81,7 +81,7 @@ class T1Broker(bt.brokers.BackBroker):
             trailamount, trailpercent, **kwargs
         )
 
-        messages.insert(0, f'卖出订单({order.ref})发送，价格: {price if price else '市价'}，数量: {size}')
+        messages.insert(0, f'卖出订单({order.ref})发送，价格: {price if price else f'市价参考({data.close[0]})'}，数量: {size}')
         self.log(data, "，".join(messages))
 
         return order
