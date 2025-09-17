@@ -1,9 +1,20 @@
 import pandas as pd
 from typing import List, Tuple, Union
 
-
 def _validate_datetime_index_24(index: pd.Index, freq: str):
-    pass
+    if len(index) <= 1:
+        return
+    # 将频率转换为pandas的Timedelta对象
+    freq_td = pd.Timedelta(freq)
+    
+    # 计算实际的频率间隔
+    actual_diffs = pd.Series(index).diff().dropna()
+    
+    # 检查所有间隔是否等于期望频率
+    if not (actual_diffs == freq_td).all():
+        # 找出不符合预期频率的位置
+        mismatched = actual_diffs[actual_diffs != freq_td]
+        raise ValueError(f"数据索引频率无效。期望频率: {freq}, 发现不匹配项: {mismatched.to_dict()}")
 
 def _validate_datetime_index(index: pd.Index, trading_periods: List[Tuple[str, str]], freq: str):
     # 生成预期的完整时间序列
@@ -25,14 +36,14 @@ def _validate_datetime_index(index: pd.Index, trading_periods: List[Tuple[str, s
 def _generate_trading_times(
         date: Union[str, pd.Timestamp],
         trading_period: Tuple[str, str],
-        frequency: str
+        freq: str
 ) -> pd.DatetimeIndex:
     # 构造完整的开始和结束时间戳
     start_time, end_time = trading_period
     start_dt = pd.Timestamp(f"{date} {start_time}")
     end_dt = pd.Timestamp(f"{date} {end_time}")
     # 解析行情频率
-    freq_td = pd.Timedelta(frequency)
+    freq_td = pd.Timedelta(freq)
 
     # 手动按频率生成时间点
     times = []
@@ -42,7 +53,7 @@ def _generate_trading_times(
         times.append(current_time)
 
     if current_time > end_dt:
-        raise ValueError(f"行情频率{frequency}不符合交易时间段要求{start_time}-{end_time}")
+        raise ValueError(f"行情频率{freq}不符合交易时间段要求{start_time}-{end_time}")
 
     # 转换为 DatetimeIndex 并返回，根据项目规范返回Series类型
     return pd.DatetimeIndex(times)
