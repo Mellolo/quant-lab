@@ -17,23 +17,31 @@ def _validate_datetime_index_24(index: pd.Index, freq: str):
         raise ValueError(f"数据索引频率无效。期望频率: {freq}, 发现不匹配项: {mismatched.to_dict()}")
 
 def _validate_datetime_index(index: pd.Index, trading_periods: List[Tuple[str, str]], freq: str):
-    # 生成预期的完整时间序列
-    # 获取索引中实际存在的日期并去重
+    # 首先获取索引中实际存在的日期并去重
     unique_dates = sorted(set([d.date().strftime('%Y-%m-%d') for d in index]))
     # 创建完整的预期时间序列
-    expected_index = pd.DatetimeIndex([])
-    for current_date in unique_dates:
-        # 为每一天创建交易时间段
-        for trading_period in trading_periods:
-            datetime_index = _generate_trading_times(current_date, trading_period, freq)
-            expected_index = expected_index.union(datetime_index)
-    expected_index = expected_index.sort_values()
+    expected_index = _generate_trading_time_index(unique_dates, trading_periods, freq)
 
     # 检查实际索引是否包含所有预期的时间点
     if not index.equals(expected_index):
         raise ValueError(f"数据索引在{freq}频率下的当前交易时段{trading_periods}无效，请检查数据")
 
-def _generate_trading_times(
+def _generate_trading_time_index(
+        dates: Union[List[str], List[pd.Timestamp]],
+        trading_periods: List[Tuple[str, str]],
+        freq: str
+) -> pd.DatetimeIndex:
+    # 创建完整的预期时间序列
+    expected_index = pd.DatetimeIndex([])
+    for current_date in dates:
+        # 为每一天创建交易时间段
+        for trading_period in trading_periods:
+            datetime_index = _generate_trading_time_index_for_period(current_date, trading_period, freq)
+            expected_index = expected_index.union(datetime_index)
+    expected_index = expected_index.sort_values()
+    return expected_index
+
+def _generate_trading_time_index_for_period(
         date: Union[str, pd.Timestamp],
         trading_period: Tuple[str, str],
         freq: str
