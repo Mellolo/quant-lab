@@ -1,5 +1,8 @@
 import pandas as pd
-from typing import List, Tuple
+from typing import List, Tuple, Dict
+
+from anaconda_project.internal.conda_api import result
+
 from .util import *
 
 def _get_freq_change(from_freq: str, to_freq: str) -> int:
@@ -29,12 +32,22 @@ def bar_merge_24(df: pd.DataFrame, from_freq: str, to_freq: str) -> pd.DataFrame
     expected_index = _generate_trading_time_index_24(unique_dates, to_freq)
     # 行情合并
     from_freq_td = pd.Timedelta(from_freq)
-    processed_df = pd.DataFrame()
+    result_list = []
     for expected_index_time in expected_index:
         df_to_merge = df[(df.index <= expected_index_time) & (df.index > expected_index_time - from_freq_td * freq_times), :]
         if df_to_merge.empty:
             continue
-        processed_df.add(_bar_merge(df_to_merge))
+        # 收集合并后的结果
+        merged_data = _bar_merge(df_to_merge)
+        merged_df = pd.DataFrame([merged_data], index=[expected_index_time])
+        result_list.append(merged_df)
+
+    # 最后一次性合并所有结果
+    if result_list:
+        processed_df = pd.concat(result_list)
+    else:
+        processed_df = pd.DataFrame()
+    processed_df.sort_index(inplace=True)
 
     return processed_df
 
@@ -55,17 +68,27 @@ def bar_merge(df: pd.DataFrame, trading_periods: List[Tuple[str, str]], from_fre
 
     # 行情合并
     from_freq_td = pd.Timedelta(from_freq)
-    processed_df = pd.DataFrame()
+    result_list = []  # 收集所有要合并的DataFrame
     for expected_index_time in expected_index:
-        df_to_merge = df[(df.index <= expected_index_time) & (df.index > expected_index_time - from_freq_td * freq_times), :]
+        df_to_merge = df.loc[(df.index <= expected_index_time) & (df.index > expected_index_time - from_freq_td * freq_times), :]
         if df_to_merge.empty:
             continue
-        processed_df.add(_bar_merge(df_to_merge))
+        # 收集合并后的结果
+        merged_data = _bar_merge(df_to_merge)
+        merged_df = pd.DataFrame([merged_data], index=[expected_index_time])
+        result_list.append(merged_df)
+
+    # 最后一次性合并所有结果
+    if result_list:
+        processed_df = pd.concat(result_list)
+    else:
+        processed_df = pd.DataFrame()
+    processed_df.sort_index(inplace=True)
 
     return processed_df
 
 
-def _bar_merge(df: pd.DataFrame) -> pd.DataFrame:
+def _bar_merge(df: pd.DataFrame) -> Dict:
     if df.empty:
         # 如果输入为空，返回空的DataFrame
         return pd.DataFrame()
@@ -97,7 +120,4 @@ def _bar_merge(df: pd.DataFrame) -> pd.DataFrame:
             # 其他列取最后一行的值
             merged_data[col] = df[col].iloc[-1]
 
-    # 将合并后的数据转换为单行DataFrame
-    result_df = pd.DataFrame([merged_data], index=[df.index[-1] if len(df) > 0 else 0])
-
-    return result_df
+    return merged_data
