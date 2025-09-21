@@ -16,6 +16,35 @@ def _validate_datetime_index_24(index: pd.Index, freq: str):
         mismatched = actual_diffs[actual_diffs != freq_td]
         raise ValueError(f"数据索引频率无效。期望频率: {freq}, 发现不匹配项: {mismatched.to_dict()}")
 
+def _generate_trading_time_index_24(
+        dates: Union[List[str], List[pd.Timestamp]],
+        freq: str
+) -> pd.DatetimeIndex:
+    # 创建完整的预期时间序列
+    expected_index = pd.DatetimeIndex([])
+    for current_date in dates:
+        # 为每一天创建交易时间段
+        start_dt = pd.Timestamp(f"{current_date} 00:00")
+        end_dt = start_dt + pd.Timedelta(days=1)
+        # 解析行情频率
+        freq_td = pd.Timedelta(freq)
+
+        # 手动按频率生成时间点
+        times = []
+        current_time = start_dt
+        while current_time < end_dt:
+            times.append(current_time)
+            current_time += freq_td
+
+        if current_time > end_dt:
+            raise ValueError(f"行情频率{freq}不符合24小时交易时段要求")
+
+        # 转换为 DatetimeIndex 并返回，根据项目规范返回Series类型
+        return pd.DatetimeIndex(times)
+
+    expected_index = expected_index.sort_values()
+    return expected_index
+
 def _validate_datetime_index(index: pd.Index, trading_periods: List[Tuple[str, str]], freq: str):
     # 首先获取索引中实际存在的日期并去重
     unique_dates = sorted(set([d.date().strftime('%Y-%m-%d') for d in index]))
