@@ -1,12 +1,12 @@
 import pandas as pd
 from typing import List, Tuple
-from .util import _validate_datetime_index, _generate_trading_time_index, _validate_datetime_index_24, _generate_trading_time_index_24
+from .util import *
 
 def _get_freq_change(from_freq: str, to_freq: str) -> int:
     # 验证输入的bar频率合并变更是否合法
     from_freq_td = pd.Timedelta(from_freq)
     to_freq_td = pd.Timedelta(to_freq)
-    if to_freq_td % from_freq_td != 0:
+    if to_freq_td % from_freq_td != pd.Timedelta(0):
         raise ValueError(f"输入的频率转换无效，不是倍数关系({from_freq}->{to_freq})")
     freq_times = to_freq_td // from_freq_td
     if freq_times <= 0:
