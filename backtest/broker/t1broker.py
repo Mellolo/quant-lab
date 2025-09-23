@@ -1,5 +1,5 @@
 import backtrader as bt
-from .logger import log_backtest
+from backtest.logger import log_backtest
 
 class T1Broker(bt.brokers.BackBroker):
     def __init__(self, name="T1Broker"):
