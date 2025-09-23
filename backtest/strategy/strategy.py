@@ -1,4 +1,5 @@
 import backtrader as bt
+from PyQt5.QtGui.QTextCursor import position
 from backtrader import BuyOrder
 from black.concurrency import cancel
 
@@ -44,25 +45,26 @@ class AbstractStrategy(bt.Strategy):
     def take_profit(self, order_ref, target_price):
         if not self.position[order_ref] or self.position[order_ref]["open_order"]:
             raise ValueError(f"设置止盈单但未找到仓位，开仓订单编号: {order_ref}")
-        self.position[order_ref]["mark_take_profit"] = target_price # 标记止盈
-
         order = self.position[order_ref]["open_order"]
         if not order.status in [order.Completed, order.Partial]:
-            return None
+            return
+
+        # 标记止盈
+        self.position[order_ref]["mark_take_profit"] = target_price
 
         # 取消之前设置的止盈单
-        self.cancel_take_profit(order_ref)
+        is_cancel_sent = self.cancel_take_profit(order_ref)
 
-        # 创建新止盈单
-        data = order.data # 交易品种
-        size = order.executed.size # 该仓位持有的数量，用作于止盈数量
-        if order.isbuy():
-            take_profit_order = self.sell(data=data, size=size, price=target_price, exectype=bt.Order.Limit)
-        else:
-            take_profit_order = self.buy(data=data, size=size, price=target_price, exectype=bt.Order.Limit)
-        self.position[order_ref]["take_profit_order"] = take_profit_order
-
-        return take_profit_order
+        # 如果之前没设置过，则直接发送止盈单，否则等待之前的止盈单被撤销
+        if not is_cancel_sent:
+            # 创建新止盈单
+            data = order.data # 交易品种
+            size = order.executed.size # 该仓位持有的数量，用作于止盈数量
+            if order.isbuy():
+                take_profit_order = self.sell(data=data, size=size, price=target_price, exectype=bt.Order.Limit)
+            else:
+                take_profit_order = self.buy(data=data, size=size, price=target_price, exectype=bt.Order.Limit)
+            self.position[order_ref]["take_profit_order"] = take_profit_order
 
     def cancel_take_profit(self, order_ref):
         if not self.position[order_ref] or self.position[order_ref]["open_order"]:
@@ -76,29 +78,34 @@ class AbstractStrategy(bt.Strategy):
                 self.position[order_ref]["last_take_profit_orders"] = []
             self.position[order_ref]["last_take_profit_orders"].append(take_profit_order)
             self.position[order_ref]["take_profit_order"] = None
+            return True
+
+        return False
 
     def stop_loss(self, order_ref, stop_price):
         if not self.position[order_ref] or self.position[order_ref]["open_order"]:
             raise ValueError(f"设置止损单但未找到仓位，开仓订单编号: {order_ref}")
-        self.position[order_ref]["mark_stop_loss"] = stop_price # 标记止损
 
         order = self.position[order_ref]["open_order"]
         if not order.status in [order.Completed, order.Partial]:
-            return None
+            return
+
+        # 标记止损
+        self.position[order_ref]["mark_stop_loss"] = stop_price  # 标记止损
 
         # 取消之前设置的止损单
-        self.cancel_stop_loss(order_ref)
+        is_cancel_sent = self.cancel_stop_loss(order_ref)
 
-        # 创建新止损单
-        data = order.data  # 交易品种
-        size = order.executed.size  # 该仓位持有的数量，用作于止损数量
-        if order.isbuy():
-            stop_loss_order = self.sell(data=data, size=size, price=stop_price, exectype=bt.Order.Stop)
-        else:
-            stop_loss_order = self.buy(data=data, size=size, price=stop_price, exectype=bt.Order.Stop)
-        self.position[order_ref]["stop_loss_order"] = stop_loss_order
-
-        return stop_loss_order
+        # 如果之前没设置过，则直接发送止损单，否则等待之前的止损单被撤销
+        if not is_cancel_sent:
+            # 创建新止损单
+            data = order.data  # 交易品种
+            size = order.executed.size  # 该仓位持有的数量，用作于止损数量
+            if order.isbuy():
+                stop_loss_order = self.sell(data=data, size=size, price=stop_price, exectype=bt.Order.Stop)
+            else:
+                stop_loss_order = self.buy(data=data, size=size, price=stop_price, exectype=bt.Order.Stop)
+            self.position[order_ref]["stop_loss_order"] = stop_loss_order
 
     def cancel_stop_loss(self, order_ref):
         if not self.position[order_ref] or self.position[order_ref]["open_order"]:
@@ -112,6 +119,9 @@ class AbstractStrategy(bt.Strategy):
                 self.position[order_ref]["last_stop_loss_orders"] = []
             self.position[order_ref]["last_stop_loss_orders"].append(stop_loss_order)
             self.position[order_ref]["stop_loss_order"] = None
+            return True
+
+        return False
 
     def cancel_order(self, order_ref):
         if not self.position[order_ref] or self.position[order_ref]["open_order"]:
@@ -156,7 +166,9 @@ class AbstractStrategy(bt.Strategy):
             for order_ref in self.position:
                 close_order = self.position[order_ref].get("close_order", None)
                 if close_order and close_order.ref == order.ref:
-                    self.cancel(order_ref)
+                    self.position[order_ref] = None
+
+
 
         elif order.status in [order.Canceled, order.Margin, order.Rejected]:
             # 检查是否是止盈或止损订单被取消
