@@ -38,7 +38,8 @@ class MA5Strategy(bt.Strategy):
                 'executed_price': order.executed.price,
                 'executed_size': order.executed.size,
                 'datetime': num2date(order.data.datetime[0]),
-                'status': order.status
+                'status': order.status,
+                'order': order,
             }
 
     def get_order_info(self, order_id):
