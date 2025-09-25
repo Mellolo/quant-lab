@@ -81,9 +81,12 @@ class AbstractStrategy(bt.Strategy):
                 size = self._get_sizing_by_loss(data, data.close[0], stop_price)
 
         if is_buy:
-            order =  self.buy(data=data, size=size, exectype=bt.Order.Market)
+            order = self.buy(data=data, size=size, exectype=bt.Order.Market)
         else:
             order = self.sell(data=data, size=size, exectype=bt.Order.Market)
+
+        if order is None:
+            return None
 
         self._my_position[order.ref] = {
             "open_order": order,
@@ -98,10 +101,19 @@ class AbstractStrategy(bt.Strategy):
         return order
 
     def open_limit(self, data, price, size = None, is_buy=True, target_price = None, stop_price = None):
+        if size is None:
+            if stop_price is None:
+                size = self.getsizing(data, isbuy=is_buy)
+            else:
+                size = self._get_sizing_by_loss(data, price, stop_price)
+
         if is_buy:
             order = self.buy(data=data, size=size, price=price, exectype=bt.Order.Limit)
         else:
             order = self.sell(data=data, size=size, price=price, exectype=bt.Order.Limit)
+
+        if order is None:
+            return None
 
         self._my_position[order.ref] = {
             "open_order": order,
@@ -116,10 +128,19 @@ class AbstractStrategy(bt.Strategy):
         return order
 
     def open_break(self, data, break_price, size = None, is_buy=True, target_price = None, stop_price = None):
+        if size is None:
+            if stop_price is None:
+                size = self.getsizing(data, isbuy=is_buy)
+            else:
+                size = self._get_sizing_by_loss(data, break_price, stop_price)
+
         if is_buy:
             order =  self.buy(data=data, size=size, price=break_price, exectype=bt.Order.Stop)
         else:
             order = self.sell(data=data, size=size, price=break_price, exectype=bt.Order.Stop)
+
+        if order is None:
+            return None
 
         self._my_position[order.ref] = {
             "open_order": order,

@@ -35,12 +35,13 @@ class MA5Strategy(AbstractStrategy):
                 order = self.get_my_position_open_order(order_ref)
                 if order.status == order.Completed:
                     if self.crossover[data] < 0:  # 下穿
-                        self.close_position(order_ref)
+                        #self.close_position(order_ref)
+                        pass
 
             # 检查是否是交叉点
             if len(order_refs) == 0:
                 if self.crossover[data] > 0:  # 上穿
-                    self.open_market(data=data, target_price=data.close[0] * 1.05, stop_price=data.close[0] * 0.95)
+                    self.open_market(data=data, target_price=data.close[0] * 1.02, stop_price=data.close[0] * 0.98)
 
 
 def main():
