@@ -1,3 +1,5 @@
+import datetime
+
 import backtrader as bt
 from backtrader import num2date
 
@@ -27,29 +29,21 @@ class AbstractStrategy(bt.Strategy):
             return None
 
     def get_my_position_open_order(self, order_ref):
-        order = self._my_position.get(order_ref, {}).get("open_order", None)
-        if order is not None:
-            return order
-        else:
-            return None
+        return self._my_position.get(order_ref, {}).get("open_order", None)
 
     def get_my_position_take_profit_order(self, order_ref):
-        order = self._my_position.get(order_ref, {}).get("take_profit_order", None)
-        if order is not None:
-            return order
-        else:
-            return None
+        return self._my_position.get(order_ref, {}).get("take_profit_order", None)
 
     def get_my_position_stop_loss_order(self, order_ref):
-        order = self._my_position.get(order_ref, {}).get("stop_loss_order", None)
-        if order is not None:
-            return order
-        else:
-            return None
+        return self._my_position.get(order_ref, {}).get("stop_loss_order", None)
 
     def next_open(self):
         if self._t1:
             for order_ref in self._my_position:
+                open_order = self._my_position.get(order_ref, {}).get("open_order", None)
+                if open_order.data.datetime.date(0) <= num2date(open_order.executed.dt).date():
+                    continue
+
                 mark_take_profit_t1 = self._my_position[order_ref].get("mark_take_profit_t1", None)
                 if mark_take_profit_t1 is not None:
                     self.take_profit(order_ref, mark_take_profit_t1)
@@ -171,7 +165,7 @@ class AbstractStrategy(bt.Strategy):
             raise ValueError(f"仓位({order_ref})已经进入平仓状态，请勿设置止盈单")
 
         # 如果t+1且是开仓当天，无法下止盈单
-        if self._t1 and num2date(order.executed.dt) == order.data.datetime.date():
+        if self._t1 and num2date(order.executed.dt).date() == order.data.datetime.date():
             raise ValueError(f"该开仓订单是t+1且是开仓当天，无法下止盈单")
 
         # 取消之前设置的止盈单
@@ -222,7 +216,7 @@ class AbstractStrategy(bt.Strategy):
             raise ValueError(f"仓位({order_ref})已经进入平仓状态，请勿设置止损单")
 
         # 如果t+1且是开仓当天，无法下止损单
-        if self._t1 and num2date(order.executed.dt) == order.data.datetime.date():
+        if self._t1 and num2date(order.executed.dt).date() == order.data.datetime.date():
             raise ValueError(f"该开仓订单是t+1且是开仓当天，无法下止损单")
 
         # 取消之前设置的止损单
@@ -279,7 +273,7 @@ class AbstractStrategy(bt.Strategy):
             raise ValueError(f"仓位({order_ref})已经发送平仓订单，请勿平仓")
 
         # 如果t+1且是开仓当天，无法平仓
-        if self._t1 and num2date(order.executed.dt) == order.data.datetime.date():
+        if self._t1 and num2date(order.executed.dt).date() == order.data.datetime.date():
             raise ValueError(f"该开仓订单是t+1且是开仓当天，无法平仓")
 
         # 取消止盈止损单

@@ -28,6 +28,8 @@ class MA5Strategy(AbstractStrategy):
             self.crossover[data] = bt.indicators.CrossOver(data.close, self.ma48[data])
 
     def next(self):
+        self.next_open()
+
         # 遍历所有数据源（标的）
         for i, data in enumerate(self.datas):
             order_refs = self.get_my_position_id_by_data(data)
