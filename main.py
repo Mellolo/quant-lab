@@ -5,10 +5,11 @@ from backtrader.utils.date import num2date
 import pandas as pd
 from backtest.broker.t1broker import T1Broker
 from backtest.barfeeds.astock import data_feed_astock
+from backtest.strategy.strategy import AbstractStrategy
 import os
 
 # 定义策略类
-class MA5Strategy(bt.Strategy):
+class MA5Strategy(AbstractStrategy):
     params = (
         ('ma_period', 48),  # 48周期，相当于4小时均线（5分钟*48=240分钟=4小时）
     )
@@ -25,38 +26,18 @@ class MA5Strategy(bt.Strategy):
             
             # 使用backtrader自带的交叉检测指标
             self.crossover[data] = bt.indicators.CrossOver(data.close, self.ma48[data])
-        
-        # 用于存储订单信息
-        self.order_dict = {}  # 用于存储订单ID和订单信息的字典
-
-    def notify_order(self, order):
-        if order.status in [order.Created, order.Submitted, order.Accepted]:
-            self.order_dict[order.ref] = {
-                'type': 'buy' if order.isbuy() else 'sell',
-                'created_price': order.created.price,
-                'created_size': order.created.size,
-                'executed_price': order.executed.price,
-                'executed_size': order.executed.size,
-                'datetime': num2date(order.data.datetime[0]),
-                'status': order.status,
-                'order': order,
-            }
-
-    def get_order_info(self, order_id):
-        """根据订单ID查询订单信息"""
-        return self.order_dict.get(order_id, None)
 
     def next(self):
         # 遍历所有数据源（标的）
         for i, data in enumerate(self.datas):
             # 检查是否是交叉点
             if self.crossover[data] > 0:  # 上穿
-                self.buy(data=data)  # 保存订单引用
+                self.open_market(data=data, size=300, target_price=data.close[0]*1.05, stop_price=data.close[0] * 0.95)  # 保存订单引用
             
             elif self.crossover[data] < 0:  # 下穿
-                position = self.getposition(data)
-                if position:  # 只有在有持仓时才卖出
-                    self.sell(data=data)  # 保存订单引用
+                for order_ref in self.position:
+                    if self.position[order_ref]["open_order"].data == data:
+                        self.close_position(order_ref)
 
 def main():
     # 创建Cerebro引擎
