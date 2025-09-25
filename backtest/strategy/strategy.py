@@ -3,9 +3,9 @@ from backtrader import num2date
 
 
 class AbstractStrategy(bt.Strategy):
-    def __init__(self):
+    def __init__(self, t1 = False):
         self.my_position = {}
-        self.t1 = False
+        self.t1 = t1
 
     def next_open(self):
         if self.t1:
@@ -302,7 +302,13 @@ class AbstractStrategy(bt.Strategy):
 
         elif order.status in [order.Expired]:
             # 订单已过期
-            pass
+            if order_type == "open":
+                del self.my_position[position_ref]
+            if order_type in ["take_profit", "stop_loss", "close"]:
+                self.close_position(order.ref)
         elif order.status in [order.Margin, order.Rejected]:
             # 交易所拒绝了订单
-            pass
+            if order_type == "open":
+                del self.my_position[position_ref]
+            if order_type in ["take_profit", "stop_loss", "close"]:
+                self.close_position(order.ref)

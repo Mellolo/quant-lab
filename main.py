@@ -15,10 +15,10 @@ class MA5Strategy(AbstractStrategy):
     )
 
     def __init__(self):
+        super().__init__(t1 = True)
         # 为每个数据源初始化移动平均线指标和交叉检测指标
         self.ma48 = {}
         self.crossover = {}
-        self.t1 = True
         
         for i, data in enumerate(self.datas):
             # 初始化移动平均线指标
@@ -27,8 +27,6 @@ class MA5Strategy(AbstractStrategy):
             
             # 使用backtrader自带的交叉检测指标
             self.crossover[data] = bt.indicators.CrossOver(data.close, self.ma48[data])
-
-        super().__init__()
 
     def next(self):
         # 遍历所有数据源（标的）
