@@ -31,15 +31,18 @@ class MA5Strategy(AbstractStrategy):
     def next(self):
         # 遍历所有数据源（标的）
         for i, data in enumerate(self.datas):
-            # 检查是否是交叉点
-            if self.crossover[data] > 0:  # 上穿
-                self.open_market(data=data, size=100, target_price=data.close[0]*1.05, stop_price=data.close[0] * 0.95)  # 保存订单引用
-            
-            elif self.crossover[data] < 0:  # 下穿
-                for order_ref in self.my_position:
-                    order = self.my_position[order_ref]["open_order"]
-                    if order.data == data and order.status == order.Completed:
+            order_refs = self.get_my_position_id_by_data(data)
+            for order_ref in order_refs:
+                order = self.get_my_position_open_order(order_ref)
+                if order.status == order.Completed:
+                    if self.crossover[data] < 0:  # 下穿
                         self.close_position(order_ref)
+
+            # 检查是否是交叉点
+            if len(order_refs) == 0:
+                if self.crossover[data] > 0:  # 上穿
+                    self.open_market(data=data, size=100, target_price=data.close[0] * 1.05, stop_price=data.close[0] * 0.95)
+
 
 def main():
     # 创建Cerebro引擎

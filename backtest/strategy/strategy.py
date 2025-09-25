@@ -7,6 +7,45 @@ class AbstractStrategy(bt.Strategy):
         self.my_position = {}
         self.t1 = t1
 
+    def get_all_my_position_id(self):
+        return list(self.my_position.keys())
+
+    def get_my_position_id_by_data(self, data):
+        result = []
+        for order_ref in self.my_position:
+            open_order = self.my_position[order_ref]["open_order"]
+            if open_order.data == data:
+                result.append(order_ref)
+
+        return result
+
+    def get_my_position(self, order_ref):
+        if order_ref in self.my_position:
+            return self.my_position[order_ref]
+        else:
+            return None
+
+    def get_my_position_open_order(self, order_ref):
+        order = self.my_position.get(order_ref, {}).get("open_order", None)
+        if order is not None:
+            return order
+        else:
+            return None
+
+    def get_my_position_take_profit_order(self, order_ref):
+        order = self.my_position.get(order_ref, {}).get("take_profit_order", None)
+        if order is not None:
+            return order
+        else:
+            return None
+
+    def get_my_position_stop_loss_order(self, order_ref):
+        order = self.my_position.get(order_ref, {}).get("stop_loss_order", None)
+        if order is not None:
+            return order
+        else:
+            return None
+
     def next_open(self):
         if self.t1:
             for order_ref in self.my_position:
