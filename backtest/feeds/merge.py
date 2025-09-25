@@ -1,20 +1,6 @@
 import pandas as pd
 from typing import List, Tuple, Dict
-
-from anaconda_project.internal.conda_api import result
-
 from .util import *
-
-def _get_freq_change(from_freq: str, to_freq: str) -> int:
-    # 验证输入的bar频率合并变更是否合法
-    from_freq_td = pd.Timedelta(from_freq)
-    to_freq_td = pd.Timedelta(to_freq)
-    if to_freq_td % from_freq_td != pd.Timedelta(0):
-        raise ValueError(f"输入的频率转换无效，不是倍数关系({from_freq}->{to_freq})")
-    freq_times = to_freq_td // from_freq_td
-    if freq_times <= 0:
-        raise ValueError(f"输入的频率转换无效，倍数不合理({from_freq}->{to_freq})")
-    return freq_times
 
 def bar_merge_24(df: pd.DataFrame, from_freq: str, to_freq: str) -> pd.DataFrame:
     # 首先验证输入的行情是否合法
@@ -87,6 +73,16 @@ def bar_merge(df: pd.DataFrame, trading_periods: List[Tuple[str, str]], from_fre
 
     return processed_df
 
+def _get_freq_change(from_freq: str, to_freq: str) -> int:
+    # 验证输入的bar频率合并变更是否合法
+    from_freq_td = pd.Timedelta(from_freq)
+    to_freq_td = pd.Timedelta(to_freq)
+    if to_freq_td % from_freq_td != pd.Timedelta(0):
+        raise ValueError(f"输入的频率转换无效，不是倍数关系({from_freq}->{to_freq})")
+    freq_times = to_freq_td // from_freq_td
+    if freq_times <= 0:
+        raise ValueError(f"输入的频率转换无效，倍数不合理({from_freq}->{to_freq})")
+    return freq_times
 
 def _bar_merge(df: pd.DataFrame) -> Dict:
     if df.empty:

@@ -1,9 +1,9 @@
 import datetime
-
 import backtrader as bt
-from backtrader.utils.date import num2date
 import pandas as pd
 from backtest.broker.t1broker import T1Broker
+from backtest.feeds.clean import data_clean_with_merge, check_index_consistency
+from backtrader.feeds import PandasData
 from backtest.feeds.feeds import data_feed_astock
 from backtest.strategy.strategy import AbstractStrategy
 import os
@@ -61,15 +61,19 @@ def main():
             file_path = os.path.join(test_dir, data_file)
             # 读取数据
             data_df = pd.read_csv(file_path)
-            
+            data_df = data_clean_with_merge(data_df,
+                                datetime.date(2025, 5, 1),
+                                datetime.date(2025, 9, 15),
+                                [("09:30", "11:30"), ("13:00", "15:00")],
+                                "5m", "30m")
             # 获取股票代码作为数据名称
             symbol = data_file.replace('.csv', '')
-
             df_dict[symbol] = data_df
 
-    datas = data_feed_astock(df_dict, datetime.date(2025, 5, 1), datetime.date(2025, 9, 15), "5m")
+    check_index_consistency(df_dict)
     # 添加数据到引擎
-    for data in datas:
+    for symbol, df in df_dict.items():
+        data = PandasData(dataname=df, fromdate=datetime.date(2025, 5, 1), todate=datetime.date(2025, 9, 15), name=symbol)
         cerebro.adddata(data)
     
     # 设置自定义broker
