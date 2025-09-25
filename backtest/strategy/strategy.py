@@ -66,7 +66,8 @@ class AbstractStrategy(bt.Strategy):
         size_by_loss = int(self.broker.getvalue() * self._loss_tolerant / loss_per_unit)
 
         # 根据保证金计算最大开仓size
-        margin_cash = self.broker.getcash() / self.broker.getcommissioninfo(data).margin
+        margin = self.broker.getcommissioninfo(data).margin if self.broker.getcommissioninfo(data).margin else 1.0
+        margin_cash = self.broker.getcash() / margin
         margin_size = margin_cash / price
 
         return min(size_by_loss, margin_size)
