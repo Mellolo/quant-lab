@@ -18,6 +18,7 @@ class MA5Strategy(AbstractStrategy):
         # 为每个数据源初始化移动平均线指标和交叉检测指标
         self.ma48 = {}
         self.crossover = {}
+        self.t1 = True
         
         for i, data in enumerate(self.datas):
             # 初始化移动平均线指标
@@ -27,16 +28,19 @@ class MA5Strategy(AbstractStrategy):
             # 使用backtrader自带的交叉检测指标
             self.crossover[data] = bt.indicators.CrossOver(data.close, self.ma48[data])
 
+        super().__init__()
+
     def next(self):
         # 遍历所有数据源（标的）
         for i, data in enumerate(self.datas):
             # 检查是否是交叉点
             if self.crossover[data] > 0:  # 上穿
-                self.open_market(data=data, size=300, target_price=data.close[0]*1.05, stop_price=data.close[0] * 0.95)  # 保存订单引用
+                self.open_market(data=data, size=100, target_price=data.close[0]*1.05, stop_price=data.close[0] * 0.95)  # 保存订单引用
             
             elif self.crossover[data] < 0:  # 下穿
-                for order_ref in self.position:
-                    if self.position[order_ref]["open_order"].data == data:
+                for order_ref in self.my_position:
+                    order = self.my_position[order_ref]["open_order"]
+                    if order.data == data and order.status == order.Completed:
                         self.close_position(order_ref)
 
 def main():
