@@ -43,7 +43,7 @@ class MA5Strategy(AbstractStrategy):
             # 检查是否是交叉点
             if len(order_refs) == 0:
                 if self.crossover[data] > 0:  # 上穿
-                    self.open_market(data=data, target_price=data.close[0] * 1.02, stop_price=data.close[0] * 0.98)
+                    self.open_market(data=data, target_price=data.close[0] * 1.03, stop_price=data.close[0] * 0.98)
 
 
 def main():
