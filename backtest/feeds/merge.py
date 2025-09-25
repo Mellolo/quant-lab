@@ -34,7 +34,7 @@ def bar_merge_24(df: pd.DataFrame, from_freq: str, to_freq: str) -> pd.DataFrame
     from_freq_td = pd.Timedelta(from_freq)
     result_list = []
     for expected_index_time in expected_index:
-        df_to_merge = df[(df.index <= expected_index_time) & (df.index > expected_index_time - from_freq_td * freq_times), :]
+        df_to_merge = df.loc[(df.index <= expected_index_time) & (df.index > expected_index_time - from_freq_td * freq_times), :]
         if df_to_merge.empty:
             continue
         # 收集合并后的结果
