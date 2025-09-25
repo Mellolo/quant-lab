@@ -4,7 +4,6 @@ import pandas as pd
 from backtest.broker.t1broker import T1Broker
 from backtest.feeds.clean import data_clean_with_merge, check_index_consistency
 from backtrader.feeds import PandasData
-from backtest.feeds.feeds import data_feed_astock
 from backtest.strategy.strategy import AbstractStrategy
 import os
 
