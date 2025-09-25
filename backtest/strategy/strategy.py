@@ -3,9 +3,10 @@ from backtrader import num2date
 
 
 class AbstractStrategy(bt.Strategy):
-    def __init__(self, t1 = False):
+    def __init__(self, t1 = False, loss_tolerant = 0.02):
         self._my_position = {}
         self._t1 = t1
+        self._loss_tolerant = loss_tolerant
 
     def get_all_my_position_id(self):
         return list(self._my_position.keys())
@@ -59,12 +60,24 @@ class AbstractStrategy(bt.Strategy):
                     self.stop_loss(order_ref, mark_stop_loss_t1)
                     self._my_position[order_ref]["mark_stop_loss_t1"] = None
 
-    def _get_sizing_by_loss(self, loss_per_unit):
-        self.broker.getvalue() *
+    def _get_sizing_by_loss(self, data, price, stop_price):
+        # 根据止损计算的开仓size
+        loss_per_unit = abs(price - stop_price)
+        size_by_loss = int(self.broker.getvalue() * self._loss_tolerant / loss_per_unit)
+
+        # 根据保证金计算最大开仓size
+        margin_cash = self.broker.getcash() / self.broker.getcommissioninfo(data).margin
+        margin_size = margin_cash / price
+
+        return min(size_by_loss, margin_size)
+
 
     def open_market(self, data, size = None, is_buy=True, target_price = None, stop_price = None):
         if size is None:
-            size = self.get_my_position_id_by_data(data)
+            if stop_price is None:
+                size = self.getsizing(data, isbuy=is_buy)
+            else:
+                size = self._get_sizing_by_loss(data, data.close[0], stop_price)
 
         if is_buy:
             order =  self.buy(data=data, size=size, exectype=bt.Order.Market)

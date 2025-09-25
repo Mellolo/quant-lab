@@ -15,7 +15,7 @@ class MA5Strategy(AbstractStrategy):
     )
 
     def __init__(self):
-        super().__init__(t1 = True)
+        super().__init__(t1=True)
         # 为每个数据源初始化移动平均线指标和交叉检测指标
         self.ma48 = {}
         self.crossover = {}
