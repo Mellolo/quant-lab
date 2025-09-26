@@ -1,9 +1,9 @@
 import backtrader as bt
 from backtest.logger import log_backtest
 
-class T1Broker(bt.brokers.BackBroker):
-    def __init__(self, name="T1Broker"):
-        super(T1Broker, self).__init__()
+class AStockBroker(bt.brokers.BackBroker):
+    def __init__(self, name="CommonBroker"):
+        super(AStockBroker, self).__init__()
         # 记录买入成交记录的日期
         self._buy_executions = {}
         self.name = name
@@ -28,7 +28,7 @@ class T1Broker(bt.brokers.BackBroker):
             return None
         
         # 执行买入操作
-        order = super(T1Broker, self).buy(
+        order = super(AStockBroker, self).buy(
             owner, data, size, price, plimit, exectype, valid, tradeid, oco,
             trailamount, trailpercent, **kwargs
         )
@@ -76,7 +76,7 @@ class T1Broker(bt.brokers.BackBroker):
             return None
         
         # 执行卖出操作
-        order = super(T1Broker, self).sell(
+        order = super(AStockBroker, self).sell(
             owner, data, size, price, plimit, exectype, valid, tradeid, oco,
             trailamount, trailpercent, **kwargs
         )
@@ -112,4 +112,4 @@ class T1Broker(bt.brokers.BackBroker):
             self.log(order.data, f"订单({order.ref})未成交:{order.Status[order.status]}")
 
         # 处理订单状态更新
-        super(T1Broker, self).notify(order)
+        super(AStockBroker, self).notify(order)
