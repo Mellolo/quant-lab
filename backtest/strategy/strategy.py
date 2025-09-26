@@ -3,9 +3,8 @@ from backtrader import num2date
 
 
 class AbstractStrategy(bt.Strategy):
-    def __init__(self, close_t1 = False, loss_tolerant = 0.02):
+    def __init__(self, loss_tolerant = 0.02):
         self._my_position = {}
-        self._close_t1 = close_t1 # 是否只允许T+1创建止盈/止损/平仓操作（注意这是交易规则，和broker下单成交的规则相互独立）
         self._loss_tolerant = loss_tolerant
 
     def get_all_my_position_id(self):
@@ -35,8 +34,8 @@ class AbstractStrategy(bt.Strategy):
     def get_my_position_stop_loss_order(self, order_ref):
         return self._my_position.get(order_ref, {}).get("stop_loss_order", None)
 
-    def next_open(self):
-        if self._close_t1:
+    def next(self):
+        if self.broker.__dict__.get("_close_t1", False):
             for order_ref in self._my_position:
                 open_order = self._my_position.get(order_ref, {}).get("open_order", None)
                 if open_order.data.datetime.date(0) <= num2date(open_order.executed.dt).date():
@@ -52,6 +51,8 @@ class AbstractStrategy(bt.Strategy):
                     self.stop_loss(order_ref, mark_stop_loss_t1)
                     self._my_position[order_ref]["mark_stop_loss_t1"] = None
 
+        self.handle_data()
+
     def _get_sizing_by_loss(self, data, price, stop_price):
         # 根据止损计算的开仓size
         loss_per_unit = abs(price - stop_price)
@@ -63,7 +64,6 @@ class AbstractStrategy(bt.Strategy):
         margin_size = margin_cash / price
 
         return min(size_by_loss, margin_size)
-
 
     def open_market(self, data, size = None, is_buy=True, target_price = None, stop_price = None):
         if size is None:
@@ -163,7 +163,7 @@ class AbstractStrategy(bt.Strategy):
             raise ValueError(f"仓位({order_ref})已经进入平仓状态，请勿设置止盈单")
 
         # 如果t+1且是开仓当天，无法下止盈单
-        if self._close_t1 and num2date(order.executed.dt).date() == order.data.datetime.date():
+        if self.broker.__dict__.get("_close_t1", False) and num2date(order.executed.dt).date() == order.data.datetime.date():
             raise ValueError(f"在当前T+1规则下，该开仓订单为当天({num2date(order.executed.dt)})成交，现在({order.data.datetime.datetime()})无法创建止盈单")
 
         # 取消之前设置的止盈单
@@ -214,7 +214,7 @@ class AbstractStrategy(bt.Strategy):
             raise ValueError(f"仓位({order_ref})已经进入平仓状态，请勿设置止损单")
 
         # 如果t+1且是开仓当天，无法下止损单
-        if self._close_t1 and num2date(order.executed.dt).date() == order.data.datetime.date():
+        if self.broker.__dict__.get("_close_t1", False) and num2date(order.executed.dt).date() == order.data.datetime.date():
             raise ValueError(f"在当前T+1规则下，该开仓订单为当天({num2date(order.executed.dt)})成交，现在({order.data.datetime.datetime()})无法创建止损单")
 
         # 取消之前设置的止损单
@@ -271,7 +271,7 @@ class AbstractStrategy(bt.Strategy):
             raise ValueError(f"仓位({order_ref})已经发送平仓订单，请勿平仓")
 
         # 如果t+1且是开仓当天，无法平仓
-        if self._close_t1 and num2date(order.executed.dt).date() == order.data.datetime.date():
+        if self.broker.__dict__.get("_close_t1", False) and num2date(order.executed.dt).date() == order.data.datetime.date():
             raise ValueError(f"在当前T+1规则下，该开仓订单为当天({num2date(order.executed.dt)})成交，现在({order.data.datetime.datetime()})无法平仓")
 
         # 取消止盈止损单
@@ -319,7 +319,7 @@ class AbstractStrategy(bt.Strategy):
             # 订单已完成
             if order_type == "open":
                 # 非t+1
-                if not self._close_t1:
+                if not self.broker.__dict__.get("_close_t1", False):
                     # 设置止盈
                     take_profit_price = self._my_position.get(position_ref, {}).get("mark_take_profit", None)
                     if take_profit_price is not None:

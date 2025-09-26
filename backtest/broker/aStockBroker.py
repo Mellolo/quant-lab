@@ -2,11 +2,12 @@ import backtrader as bt
 from backtest.logger import log_backtest
 
 class AStockBroker(bt.brokers.BackBroker):
-    def __init__(self, name="CommonBroker"):
+    def __init__(self, name="AStockBroker"):
         super(AStockBroker, self).__init__()
         # 记录买入成交记录的日期
         self._buy_executions = {}
         self.name = name
+        self._close_t1 = True
 
     def log(self, data, message):
         log_backtest(data, message, source=self.name)

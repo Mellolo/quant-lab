@@ -3,6 +3,7 @@ import backtrader as bt
 import pandas as pd
 from backtrader import BackBroker
 from backtest.broker.aStockBroker import AStockBroker
+from backtest.broker.commonBroker import CommonBroker
 from backtest.feeds.clean import data_clean_with_merge, check_index_consistency
 from backtrader.feeds import PandasData
 from backtest.strategy.strategy import AbstractStrategy
@@ -15,7 +16,7 @@ class MA5Strategy(AbstractStrategy):
     )
 
     def __init__(self):
-        super().__init__(close_t1=True)
+        super().__init__()
         # 为每个数据源初始化移动平均线指标和交叉检测指标
         self.ma48 = {}
         self.crossover = {}
@@ -28,9 +29,7 @@ class MA5Strategy(AbstractStrategy):
             # 使用backtrader自带的交叉检测指标
             self.crossover[data] = bt.indicators.CrossOver(data.close, self.ma48[data])
 
-    def next(self):
-        self.next_open()
-
+    def handle_data(self):
         # 遍历所有数据源（标的）
         for i, data in enumerate(self.datas):
             order_refs = self.get_my_position_id_by_data(data)
@@ -80,7 +79,7 @@ def main():
         cerebro.adddata(data)
     
     # 设置自定义broker
-    cerebro.broker = AStockBroker()
+    cerebro.broker = CommonBroker()
     
     # 设置初始资金
     cerebro.broker.setcash(10000.0)
