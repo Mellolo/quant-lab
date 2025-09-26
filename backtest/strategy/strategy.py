@@ -7,7 +7,7 @@ from backtrader import num2date
 class AbstractStrategy(bt.Strategy):
     def __init__(self, close_t1 = False, loss_tolerant = 0.02):
         self._my_position = {}
-        self._close_t1 = close_t1 # 是否只允许T+1创建平仓单
+        self._close_t1 = close_t1 # 是否只允许T+1创建止盈/止损/平仓操作（注意这是交易规则，和broker规则相互独立）
         self._loss_tolerant = loss_tolerant
 
     def get_all_my_position_id(self):
@@ -166,7 +166,7 @@ class AbstractStrategy(bt.Strategy):
 
         # 如果t+1且是开仓当天，无法下止盈单
         if self._close_t1 and num2date(order.executed.dt).date() == order.data.datetime.date():
-            raise ValueError(f"该开仓订单是t+1且是开仓当天，无法下止盈单")
+            raise ValueError(f"在当前T+1规则下，该开仓订单为当天({num2date(order.executed.dt)})成交，现在({order.data.datetime.datetime()})无法创建止盈单")
 
         # 取消之前设置的止盈单
         is_cancel = self.cancel_take_profit(order_ref)
@@ -217,7 +217,7 @@ class AbstractStrategy(bt.Strategy):
 
         # 如果t+1且是开仓当天，无法下止损单
         if self._close_t1 and num2date(order.executed.dt).date() == order.data.datetime.date():
-            raise ValueError(f"该开仓订单是t+1且是开仓当天，无法下止损单")
+            raise ValueError(f"在当前T+1规则下，该开仓订单为当天({num2date(order.executed.dt)})成交，现在({order.data.datetime.datetime()})无法创建止损单")
 
         # 取消之前设置的止损单
         is_cancel = self.cancel_stop_loss(order_ref)
@@ -274,7 +274,7 @@ class AbstractStrategy(bt.Strategy):
 
         # 如果t+1且是开仓当天，无法平仓
         if self._close_t1 and num2date(order.executed.dt).date() == order.data.datetime.date():
-            raise ValueError(f"该开仓订单是t+1且是开仓当天，无法平仓")
+            raise ValueError(f"在当前T+1规则下，该开仓订单为当天({num2date(order.executed.dt)})成交，现在({order.data.datetime.datetime()})无法平仓")
 
         # 取消止盈止损单
         take_profit_cancel = self.cancel_take_profit(order_ref)

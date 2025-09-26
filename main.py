@@ -38,7 +38,7 @@ class MA5Strategy(AbstractStrategy):
                 order = self.get_my_position_open_order(order_ref)
                 if order.status == order.Completed:
                     if self.crossover[data] < 0:  # 下穿
-                        self.close_position(order_ref)
+                        self.take_profit(order_ref, data.close[0] * 1.05)
                         pass
 
             # 检查是否是交叉点
