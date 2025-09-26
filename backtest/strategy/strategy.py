@@ -1,5 +1,3 @@
-import datetime
-
 import backtrader as bt
 from backtrader import num2date
 
@@ -7,7 +5,7 @@ from backtrader import num2date
 class AbstractStrategy(bt.Strategy):
     def __init__(self, close_t1 = False, loss_tolerant = 0.02):
         self._my_position = {}
-        self._close_t1 = close_t1 # 是否只允许T+1创建止盈/止损/平仓操作（注意这是交易规则，和broker规则相互独立）
+        self._close_t1 = close_t1 # 是否只允许T+1创建止盈/止损/平仓操作（注意这是交易规则，和broker下单成交的规则相互独立）
         self._loss_tolerant = loss_tolerant
 
     def get_all_my_position_id(self):
