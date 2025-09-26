@@ -37,7 +37,7 @@ class MA5Strategy(AbstractStrategy):
                 order = self.get_my_position_open_order(order_ref)
                 if order.status == order.Completed:
                     if self.crossover[data] < 0:  # 下穿
-                        self.take_profit(order_ref, data.close[0] * 1.05)
+                        #self.close_position(order_ref)
                         pass
 
             # 检查是否是交叉点
@@ -79,7 +79,7 @@ def main():
         cerebro.adddata(data)
     
     # 设置自定义broker
-    cerebro.broker = CommonBroker()
+    cerebro.broker = AStockBroker()
     
     # 设置初始资金
     cerebro.broker.setcash(10000.0)
