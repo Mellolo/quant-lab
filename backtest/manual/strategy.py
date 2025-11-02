@@ -72,4 +72,6 @@ class ManualStrategy(AbstractStrategy):
         elif signal.signal_type == ManualSignal.Continue:
             pass
 
+    def stop(self):
+        self.info_queue.put(ManualStrategyInfo(stop=True))
 
