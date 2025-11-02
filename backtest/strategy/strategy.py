@@ -11,10 +11,14 @@ class AbstractStrategy(bt.Strategy):
     def get_all_my_position_id(self):
         return list(self._my_position.keys())
 
-    def get_my_position_id_by_data(self, data):
+    def get_my_position_id_by_data(self, data, skip_closed =  False):
         result = []
         for order_ref in self._my_position:
             open_order = self._my_position[order_ref]["open_order"]
+            if skip_closed:
+                if self._my_position[order_ref].get("completed", False) or self._my_position[order_ref].get("cancelled", False):
+                    continue
+
             if open_order.data == data:
                 result.append(order_ref)
 
