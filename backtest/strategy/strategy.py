@@ -1,5 +1,6 @@
 import backtrader as bt
 from backtrader import num2date
+import pandas as pd
 
 
 class AbstractStrategy(bt.Strategy):
@@ -33,6 +34,18 @@ class AbstractStrategy(bt.Strategy):
 
     def get_my_position_stop_loss_order(self, order_ref):
         return self._my_position.get(order_ref, {}).get("stop_loss_order", None)
+
+    @staticmethod
+    def get_data_as_df(data):
+        df = pd.DataFrame({
+            'datetime': [data.datetime.datetime(i) for i in range(1-len(data), 1)],
+            'open': [data.open[i] for i in range(1-len(data), 1)],
+            'high': [data.high[i] for i in range(1-len(data), 1)],
+            'low': [data.low[i] for i in range(1-len(data), 1)],
+            'close': [data.close[i] for i in range(1-len(data), 1)],
+            'volume': [data.volume[i] for i in range(1-len(data), 1)],
+        })
+        return df
 
     def next(self):
         if self.broker.__dict__.get("_close_t1", False):
@@ -344,12 +357,19 @@ class AbstractStrategy(bt.Strategy):
             elif order_type in ["close", "take_profit", "stop_loss"]:
                 self.cancel_take_profit(position_ref)
                 self.cancel_stop_loss(position_ref)
-                del self._my_position[position_ref]
+
+                open_order = self.get_my_position_open_order(position_ref)
+                self._my_position[position_ref]["completed"] = True
+                self._my_position[position_ref]["return"] = (order.executed.price - open_order.executed.price) * order.executed.size * (1 if open_order.isbuy() else -1)
+
         elif order.status in [order.Partial]:
             # 订单部分成交
             raise ValueError(f"订单部分成交的场景，回测暂不支持，订单编号: {order.ref}")
         elif order.status in [order.Canceled]:
             # 订单被取消
+            if order_type == "open":
+                self._my_position[position_ref]["cancelled"] = True
+
             if order_type == "take_profit":
                 self._my_position[position_ref]["take_profit_order"] = None
                 # 若有，设置新止盈
@@ -375,12 +395,12 @@ class AbstractStrategy(bt.Strategy):
         elif order.status in [order.Expired]:
             # 订单已过期
             if order_type == "open":
-                del self._my_position[position_ref]
+                self._my_position[position_ref]["cancelled"] = True
             if order_type in ["take_profit", "stop_loss", "close"]:
                 self.close_position(order.ref)
         elif order.status in [order.Margin, order.Rejected]:
             # 交易所拒绝了订单
             if order_type == "open":
-                del self._my_position[position_ref]
+                self._my_position[position_ref]["cancelled"] = True
             if order_type in ["take_profit", "stop_loss", "close"]:
                 self.close_position(order.ref)
