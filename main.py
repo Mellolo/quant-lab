@@ -1,12 +1,12 @@
 import datetime
 import backtrader as bt
 import pandas as pd
-from backtrader import BackBroker
 from backtest.broker.aStockBroker import AStockBroker
 from backtest.broker.commonBroker import CommonBroker
 from backtest.feeds.clean import data_clean_with_merge, check_index_consistency
 from backtrader.feeds import PandasData
 from backtest.strategy.strategy import AbstractStrategy
+from backtest.manual.backtest import ManualBacktestEngine, ManualSignal
 import os
 
 # 定义策略类
@@ -113,5 +113,25 @@ def main():
     # 显示结果图表
     cerebro.plot()
 
+def backtest():
+    engine = ManualBacktestEngine()
+    data_df = pd.read_csv('test/600150.XSHG.csv')
+    data_df = data_clean_with_merge(data_df,
+                                    datetime.date(2025, 7, 1),
+                                    datetime.date(2025, 9, 15),
+                                    [("09:30", "11:30"), ("13:00", "15:00")],
+                                    "5m", "30m")
+    engine.add_data(data_df)
+    engine.set_from_datetime(datetime.date(2025, 8, 1))
+    engine.run()
+
+    while True:
+        info = engine.get_info()
+        df = info.get_arg("data")
+        if info.get_arg("stop"):
+            break
+        engine.send_signal(ManualSignal(ManualSignal.Continue))
+    engine.plot()
+
 if __name__ == '__main__':
-    main()
+    backtest()

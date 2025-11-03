@@ -1,3 +1,4 @@
+import datetime
 from queue import Queue
 import backtrader as bt
 import pandas as pd
@@ -37,9 +38,9 @@ class ManualStrategy(AbstractStrategy):
 
     def handle_data(self):
         # 行情信息
-        data = self.datas[0]
-        market_index = self.datas[1] if len(self.datas) > 1 else None
-        industry_index = self.datas[2] if len(self.datas) > 2 else None
+        data = self.get_data_as_df(self.datas[0])
+        market_index = self.get_data_as_df(self.datas[1]) if len(self.datas) > 1 else None
+        industry_index = self.get_data_as_df(self.datas[2]) if len(self.datas) > 2 else None
 
         # 持仓信息
         my_position_id = None
@@ -82,9 +83,10 @@ class ManualStrategy(AbstractStrategy):
     def stop(self):
         self.info_queue.put(ManualStrategyInfo(stop=True))
 
-class ManualBacktest:
+class ManualBacktestEngine:
     def __init__(self, broker = AStockBroker(), cash = 10000.0, commission=0.001):
         # 回测引擎
+        self.from_datetime = None
         self.cerebro = bt.Cerebro()
 
         # 回测引擎信息交互队列
@@ -123,11 +125,13 @@ class ManualBacktest:
     def add_industry_index(self, df: pd.DataFrame):
         self.df_dict["add_industry_index"] = df
 
-    def get_info(self):
+    def set_from_datetime(self, t: datetime.datetime):
+        self.from_datetime = pd.Timestamp(t)
+
+    def get_info(self) -> ManualStrategyInfo:
        return self.info
 
-    def send_signal(self, signal_type, **kwargs):
-        signal = ManualSignal(signal_type, **kwargs)
+    def send_signal(self, signal: ManualSignal):
         self.signal_queue.put(signal)
         self.info = self.info_queue.get()
 
@@ -142,12 +146,18 @@ class ManualBacktest:
         def _backtest():
             results = self.cerebro.run()
             self.result = results[0]
-        threading.Thread(target=_backtest()).start()
-
+        threading.Thread(target=_backtest).start()
         self.info = self.info_queue.get()
 
+        if self.from_datetime is not None:
+            while True:
+                data_df = self.info.get_arg("data")
+                if data_df.loc[len(data_df) - 1, "datetime"] >= self.from_datetime:
+                    break
+                self.send_signal(ManualSignal(ManualSignal.Continue))
+
     def plot(self):
-        if self.result:
+        if self.result is not None:
             self.cerebro.plot()
 
     def get_sharpe(self):
