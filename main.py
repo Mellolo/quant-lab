@@ -15,13 +15,22 @@ def backtest():
     engine.set_from_datetime(datetime.datetime(2025, 8, 1))
     engine.run()
 
+    first = True
     while True:
         info = engine.get_info()
         df = info.get_arg("data")
         if info.get_arg("stop"):
             break
-        engine.send_signal(ManualSignal(ManualSignal.Continue))
+        if first:
+            engine.send_signal(ManualSignal(ManualSignal.Open))
+            first = False
+        else:
+            engine.send_signal(ManualSignal(ManualSignal.Continue))
     engine.plot()
 
 if __name__ == '__main__':
     backtest()
+    # from http_service.app import app
+    #
+    # print("启动HTTP服务...")
+    # app.run(host='0.0.0.0', port=9990, debug=True)

@@ -37,19 +37,22 @@ class ManualStrategy(AbstractStrategy):
         self.info_queue = info_queue
 
     def handle_data(self):
+        data = self.datas[0]
+
         # 行情信息
-        data = self.get_data_as_df(self.datas[0])
-        market_index = self.get_data_as_df(self.datas[1]) if len(self.datas) > 1 else None
-        industry_index = self.get_data_as_df(self.datas[2]) if len(self.datas) > 2 else None
+        data_df = self.get_data_as_df(self.datas[0])
+        market_index_df = self.get_data_as_df(self.datas[1]) if len(self.datas) > 1 else None
+        industry_index_df = self.get_data_as_df(self.datas[2]) if len(self.datas) > 2 else None
 
         # 持仓信息
+        positions = self._my_position
         my_position_id = None
         order_refs = self.get_my_position_id_by_data(data, skip_closed=True)
-        if len(order_refs) > 1:
+        if len(order_refs) >= 1:
             my_position_id = order_refs[0]
 
         # 输出策略信息
-        info = ManualStrategyInfo(data=data, market_index=market_index, industry_index=industry_index, my_position=my_position_id)
+        info = ManualStrategyInfo(data=data_df, market_index=market_index_df, industry_index=industry_index_df, my_position=positions)
         self.info_queue.put(info)
 
         # 接收外部信号

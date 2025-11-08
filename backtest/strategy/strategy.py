@@ -362,9 +362,8 @@ class AbstractStrategy(bt.Strategy):
                 self.cancel_take_profit(position_ref)
                 self.cancel_stop_loss(position_ref)
 
-                open_order = self.get_my_position_open_order(position_ref)
                 self._my_position[position_ref]["completed"] = True
-                self._my_position[position_ref]["return"] = (order.executed.price - open_order.executed.price) * order.executed.size * (1 if open_order.isbuy() else -1)
+                self._my_position[position_ref]["completed_order"] = order
 
         elif order.status in [order.Partial]:
             # 订单部分成交
