@@ -1,6 +1,9 @@
 from flask import Flask, jsonify, request
+from flask_socketio import SocketIO, emit
 
 app = Flask(__name__)
+app.config['SECRET_KEY'] = 'secret!'
+socketio = SocketIO(app, cors_allowed_origins="*")
 
 @app.route('/api/example', methods=['GET'])
 def example_endpoint():
@@ -43,3 +46,37 @@ def health_check():
     健康检查接口
     """
     return jsonify({"status": "healthy"})
+
+@socketio.on('connect')
+def handle_connect():
+    """
+    处理客户端连接事件
+    """
+    print('Client connected')
+    emit('response', {'data': 'Connected successfully'})
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    """
+    处理客户端断开连接事件
+    """
+    print('Client disconnected')
+
+@socketio.on('message')
+def handle_message(data):
+    """
+    处理客户端发送的消息
+    """
+    print('Received message: ' + str(data))
+    emit('response', {'data': f"Server received: {data}"})
+
+@socketio.on('json')
+def handle_json(json_data):
+    """
+    处理客户端发送的JSON数据
+    """
+    print('Received json: ' + str(json_data))
+    emit('response', {'data': f"Server processed JSON: {json_data}"})
+
+if __name__ == '__main__':
+    socketio.run(app, host='0.0.0.0', port=9990, debug=True)

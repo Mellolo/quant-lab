@@ -13,8 +13,14 @@ def backtest():
                                     "5m", "30m")
     engine.add_data(data_df)
     engine.set_from_datetime(datetime.datetime(2025, 8, 1))
-    engine.run()
+    run_backtest_with_websocket(engine)
 
+def run_backtest_with_websocket(engine):
+    """
+    运行回测引擎并通过WebSocket发送实时数据
+    """
+    # 这里应该导入并使用WebSocket连接发送数据
+    # 为简化示例，这里只展示逻辑结构
     first = True
     while True:
         info = engine.get_info()
@@ -29,8 +35,8 @@ def backtest():
     engine.plot()
 
 if __name__ == '__main__':
-    backtest()
-    # from http_service.app import app
-    #
-    # print("启动HTTP服务...")
-    # app.run(host='0.0.0.0', port=9990, debug=True)
+    # backtest()
+    from http_service.app import socketio, app
+    
+    print("启动HTTP服务和WebSocket服务...")
+    socketio.run(app, host='0.0.0.0', port=9990, debug=True)
