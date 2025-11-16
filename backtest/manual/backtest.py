@@ -37,6 +37,7 @@ class ManualStrategy(AbstractStrategy):
         self.signal_queue = signal_queue
         self.info_queue = info_queue
         self.cash_before_position = 0.
+        self.position_info = {}
 
     def get_info(self) -> ManualStrategyInfo:
         # 行情信息
@@ -90,13 +91,24 @@ class ManualStrategy(AbstractStrategy):
             is_buy = signal.get_arg("is_buy") if signal.get_arg("is_buy") is not None else True
 
             if price is None:
-                self.open_market(data, is_buy=is_buy, target_price=target_price, stop_price=stop_price)
+                order = self.open_market(data, is_buy=is_buy, target_price=target_price, stop_price=stop_price)
             else:
-                self.open_limit(data, price, is_buy=is_buy, target_price=target_price, stop_price=stop_price)
+                order = self.open_limit(data, price, is_buy=is_buy, target_price=target_price, stop_price=stop_price)
+
+            self.position_info[order.ref] = {
+                "open_reason": signal.get_arg("reason")
+            }
 
         elif signal.signal_type == ManualSignal.Close:
             if my_position_id is None:
                 raise ValueError("没有仓位，不允许执行平仓")
+
+            if my_position_id in self.position_info:
+                self.position_info[my_position_id]["close_reason"] = signal.get_arg("reason")
+            else:
+                self.position_info[my_position_id] = {
+                    "close_reason": signal.get_arg("reason")
+                }
 
             # 平仓
             self.close_position(my_position_id)
