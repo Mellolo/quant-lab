@@ -36,7 +36,7 @@ class ManualStrategy(AbstractStrategy):
         super().__init__()
         self.signal_queue = signal_queue
         self.info_queue = info_queue
-        self.position_cash = {}
+        self.cash_before_position = 0.
 
     def get_info(self) -> ManualStrategyInfo:
         # 行情信息
@@ -45,17 +45,25 @@ class ManualStrategy(AbstractStrategy):
         industry_index_df = self.get_data_as_df(self.datas[2]) if len(self.datas) > 2 else None
 
         # 持仓信息
+        position_running = None
+        completed_positions = []
         order_refs = self.get_my_position_id_by_data(self.datas[0])
         for order_ref in order_refs:
             position = self.get_my_position(order_ref)
-            if position.get_
+            if position.is_completed() or position.is_cancelled():
+                completed_positions.append(position)
+            else:
+                position_running = position
+
+        sorted(completed_positions, key=lambda x: x.get_open_order().created)
 
         # 输出策略信息
         info = ManualStrategyInfo(data=data_df, market_index=market_index_df, industry_index=industry_index_df,
-                                  my_position=positions)
+                                  position_running=position_running, completed_positions=completed_positions)
         return info
 
     def handle_data(self):
+        # 行情
         data = self.datas[0]
 
         # 持仓信息
@@ -63,7 +71,9 @@ class ManualStrategy(AbstractStrategy):
         order_refs = self.get_my_position_id_by_data(data, skip_closed=True)
         if len(order_refs) >= 1:
             my_position_id = order_refs[0]
-
+        else:
+            # 无仓位情况下，记录开仓前的现金
+            self.cash_before_position = self.broker.getcash()
 
         # 接收外部信号
         signal = self.signal_queue.get()
@@ -79,15 +89,10 @@ class ManualStrategy(AbstractStrategy):
             stop_price = signal.get_arg("stop_price")
             is_buy = signal.get_arg("is_buy") if signal.get_arg("is_buy") is not None else True
 
-            # 记录开仓前的现金
-            position_cash = self.broker.getcash()
-
             if price is None:
-                order = self.open_market(data, is_buy=is_buy, target_price=target_price, stop_price=stop_price)
+                self.open_market(data, is_buy=is_buy, target_price=target_price, stop_price=stop_price)
             else:
-                order = self.open_limit(data, price, is_buy=is_buy, target_price=target_price, stop_price=stop_price)
-
-            self.position_cash[order.ref] = position_cash
+                self.open_limit(data, price, is_buy=is_buy, target_price=target_price, stop_price=stop_price)
 
         elif signal.signal_type == ManualSignal.Close:
             if my_position_id is None:
