@@ -4,11 +4,11 @@ import backtrader as bt
 import pandas as pd
 from backtrader.feeds import PandasData
 import threading
-from typing import Dict, Tuple
+from typing import Dict
 
 from backtest.broker.aStockBroker import AStockBroker
 from backtest.feeds.clean import check_index_consistency
-from backtest.strategy.strategy import AbstractStrategy
+from backtest.strategy.strategy import AbstractStrategy, SinglePosition
 
 class ManualSignal:
     Open, Close, Continue = range(3)
@@ -27,6 +27,21 @@ class ManualStrategyInfo:
         self.args = {}
         for key, val in iter(kwargs.items()):
             self.args[key] = val
+
+    def get_arg(self, key):
+        return self.args.get(key, None)
+
+class ManualStrategyPosition:
+    def __init__(self, pos: SinglePosition, **kwargs):
+        # 后续可改为更精简的仓位信息
+        self.position = pos
+
+        self.args = {}
+        for key, val in iter(kwargs.items()):
+            self.args[key] = val
+
+    def get_position(self):
+        return self.position
 
     def get_arg(self, key):
         return self.args.get(key, None)
@@ -50,13 +65,13 @@ class ManualStrategy(AbstractStrategy):
         completed_positions = []
         order_refs = self.get_my_position_id_by_data(self.datas[0])
         for order_ref in order_refs:
-            position = self.get_my_position(order_ref)
-            if position.is_completed() or position.is_cancelled():
-                completed_positions.append(position)
+            pos = ManualStrategyPosition(self.get_my_position(order_ref), **self.position_info[order_ref])
+            if pos.get_position().is_completed() or pos.get_position().is_cancelled():
+                completed_positions.append(pos)
             else:
-                position_running = position
+                position_running = pos
 
-        sorted(completed_positions, key=lambda x: x.get_open_order().created)
+        sorted(completed_positions, key=lambda x: x.get_position().get_open_order().created)
 
         # 输出策略信息
         info = ManualStrategyInfo(data=data_df, market_index=market_index_df, industry_index=industry_index_df,

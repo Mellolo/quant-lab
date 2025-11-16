@@ -1,19 +1,19 @@
 import backtrader as bt
-from PyQt5.QtGui.QTextCursor import position
 from backtrader import num2date
 import pandas as pd
 from typing import Dict
+import copy
 
-class Position:
+class SinglePosition:
     def __init__(self, open_order: bt.Order, mark_take_profit: float = None, mark_stop_loss: float = None):
         self.open_order = open_order
         self.take_profit_order = None
         self.stop_loss_order = None
         self.close_order = None
 
-        self.mark_take_profit = None
+        self.mark_take_profit = mark_take_profit
         self.mark_take_profit_t1 = None
-        self.mark_stop_loss = None
+        self.mark_stop_loss = mark_stop_loss
         self.mark_stop_loss_t1 = None
         self.mark_close = False
 
@@ -114,7 +114,7 @@ class Position:
 
 class AbstractStrategy(bt.Strategy):
     def __init__(self, loss_tolerant = 0.02):
-        self._my_position:Dict[str, Position] = {}
+        self._my_position:Dict[str, SinglePosition] = {}
         self._loss_tolerant = loss_tolerant
 
     def get_all_my_position_id(self):
@@ -203,7 +203,7 @@ class AbstractStrategy(bt.Strategy):
         if order is None:
             return None
 
-        self._my_position[order.ref] = Position(order, mark_take_profit=target_price, mark_stop_loss=stop_price)
+        self._my_position[order.ref] = SinglePosition(order, mark_take_profit=target_price, mark_stop_loss=stop_price)
         return order
 
     def open_limit(self, data, price, size = None, is_buy: bool = True, target_price: float = None, stop_price: float = None):
@@ -221,7 +221,7 @@ class AbstractStrategy(bt.Strategy):
         if order is None:
             return None
 
-        self._my_position[order.ref] = Position(order, mark_take_profit=target_price, mark_stop_loss=stop_price)
+        self._my_position[order.ref] = SinglePosition(order, mark_take_profit=target_price, mark_stop_loss=stop_price)
         return order
 
     def open_break(self, data, break_price, size = None, is_buy: bool = True, target_price: float = None, stop_price: float = None):
@@ -239,7 +239,7 @@ class AbstractStrategy(bt.Strategy):
         if order is None:
             return None
 
-        self._my_position[order.ref] = Position(order, mark_take_profit=target_price, mark_stop_loss=stop_price)
+        self._my_position[order.ref] = SinglePosition(order, mark_take_profit=target_price, mark_stop_loss=stop_price)
         return order
 
     def take_profit(self, order_ref, target_price):
