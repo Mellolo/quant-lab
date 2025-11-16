@@ -4,6 +4,7 @@ import backtrader as bt
 import pandas as pd
 from backtrader.feeds import PandasData
 import threading
+from typing import Dict, Tuple
 
 from backtest.broker.aStockBroker import AStockBroker
 from backtest.feeds.clean import check_index_consistency
@@ -35,25 +36,34 @@ class ManualStrategy(AbstractStrategy):
         super().__init__()
         self.signal_queue = signal_queue
         self.info_queue = info_queue
+        self.position_cash = {}
 
-    def handle_data(self):
-        data = self.datas[0]
-
+    def get_info(self) -> ManualStrategyInfo:
         # 行情信息
         data_df = self.get_data_as_df(self.datas[0])
         market_index_df = self.get_data_as_df(self.datas[1]) if len(self.datas) > 1 else None
         industry_index_df = self.get_data_as_df(self.datas[2]) if len(self.datas) > 2 else None
 
         # 持仓信息
-        positions = self._my_position
+        order_refs = self.get_my_position_id_by_data(self.datas[0])
+        for order_ref in order_refs:
+            position = self.get_my_position(order_ref)
+            if position.get_
+
+        # 输出策略信息
+        info = ManualStrategyInfo(data=data_df, market_index=market_index_df, industry_index=industry_index_df,
+                                  my_position=positions)
+        return info
+
+    def handle_data(self):
+        data = self.datas[0]
+
+        # 持仓信息
         my_position_id = None
         order_refs = self.get_my_position_id_by_data(data, skip_closed=True)
         if len(order_refs) >= 1:
             my_position_id = order_refs[0]
 
-        # 输出策略信息
-        info = ManualStrategyInfo(data=data_df, market_index=market_index_df, industry_index=industry_index_df, my_position=positions)
-        self.info_queue.put(info)
 
         # 接收外部信号
         signal = self.signal_queue.get()
@@ -68,10 +78,16 @@ class ManualStrategy(AbstractStrategy):
             target_price = signal.get_arg("target_price")
             stop_price = signal.get_arg("stop_price")
             is_buy = signal.get_arg("is_buy") if signal.get_arg("is_buy") is not None else True
+
+            # 记录开仓前的现金
+            position_cash = self.broker.getcash()
+
             if price is None:
-                self.open_market(data, is_buy=is_buy, target_price=target_price, stop_price=stop_price)
+                order = self.open_market(data, is_buy=is_buy, target_price=target_price, stop_price=stop_price)
             else:
-                self.open_limit(data, price, is_buy=is_buy, target_price=target_price, stop_price=stop_price)
+                order = self.open_limit(data, price, is_buy=is_buy, target_price=target_price, stop_price=stop_price)
+
+            self.position_cash[order.ref] = position_cash
 
         elif signal.signal_type == ManualSignal.Close:
             if my_position_id is None:
@@ -88,13 +104,16 @@ class ManualStrategy(AbstractStrategy):
 
 class ManualBacktestEngine:
     def __init__(self, broker = AStockBroker(), cash = 10000.0, commission=0.001):
+        # 用于恢复回测状态的数据
+        self.restore_order = {}
+        self.restore_datetime = None
+
         # 回测引擎
-        self.from_datetime = None
         self.cerebro = bt.Cerebro()
 
         # 回测引擎信息交互队列
-        self.signal_queue = Queue(1)
-        self.info_queue = Queue(1)
+        self.signal_queue = Queue[ManualSignal](1)
+        self.info_queue = Queue[ManualStrategyInfo](1)
 
         # 回测行情数据
         self.df_dict = {}
@@ -128,8 +147,10 @@ class ManualBacktestEngine:
     def add_industry_index(self, df: pd.DataFrame):
         self.df_dict["add_industry_index"] = df
 
-    def set_from_datetime(self, t: datetime.datetime):
-        self.from_datetime = pd.Timestamp(t)
+    def set_restore_data(self, t: datetime.datetime, cash: float, order: Dict[str, ]):
+        self.restore_datetime = pd.Timestamp(t)
+        for dt, trade in trades.items():
+            self.restore_trades[pd.Timestamp(dt)] = trade
 
     def get_info(self) -> ManualStrategyInfo:
        return self.info
@@ -152,12 +173,22 @@ class ManualBacktestEngine:
         threading.Thread(target=_backtest).start()
         self.info = self.info_queue.get()
 
-        if self.from_datetime is not None:
+        if self.restore_datetime is not None:
             while True:
                 data_df = self.info.get_arg("data")
-                if data_df.loc[len(data_df) - 1, "datetime"] >= self.from_datetime:
+                if data_df.loc[len(data_df) - 1, "datetime"] >= self.restore_datetime:
                     break
                 self.send_signal(ManualSignal(ManualSignal.Continue))
+
+    def restore(self):
+        while True:
+            data_df = self.info.get_arg("data")
+
+
+            if data_df.loc[len(data_df) - 1, "datetime"] >= self.restore_datetime:
+                break
+
+            self.send_signal(ManualSignal(ManualSignal.Continue))
 
     def plot(self):
         if self.result is not None:
