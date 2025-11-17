@@ -135,10 +135,9 @@ class ManualStrategy(AbstractStrategy):
         self.info_queue.put(ManualStrategyInfo(stop=True))
 
 class ManualBacktestEngine:
-    def __init__(self, broker = AStockBroker(), cash = 10000.0, commission=0.001):
-        # 用于恢复回测状态的数据
-        self.restore_order = {}
-        self.restore_datetime = None
+    def __init__(self, broker = AStockBroker(), cash = 10000.0, commission=0.001, from_datetime: pd.Timestamp = None):
+        # 回测开始的时间
+        self.from_datetime = from_datetime
 
         # 回测引擎
         self.cerebro = bt.Cerebro()
@@ -179,11 +178,6 @@ class ManualBacktestEngine:
     def add_industry_index(self, df: pd.DataFrame):
         self.df_dict["add_industry_index"] = df
 
-    def set_restore_data(self, t: datetime.datetime, cash: float, order: Dict[str, ]):
-        self.restore_datetime = pd.Timestamp(t)
-        for dt, trade in trades.items():
-            self.restore_trades[pd.Timestamp(dt)] = trade
-
     def get_info(self) -> ManualStrategyInfo:
        return self.info
 
@@ -205,22 +199,12 @@ class ManualBacktestEngine:
         threading.Thread(target=_backtest).start()
         self.info = self.info_queue.get()
 
-        if self.restore_datetime is not None:
+        if self.from_datetime is not None:
             while True:
                 data_df = self.info.get_arg("data")
-                if data_df.loc[len(data_df) - 1, "datetime"] >= self.restore_datetime:
+                if data_df.loc[len(data_df) - 1, "datetime"] >= self.from_datetime:
                     break
                 self.send_signal(ManualSignal(ManualSignal.Continue))
-
-    def restore(self):
-        while True:
-            data_df = self.info.get_arg("data")
-
-
-            if data_df.loc[len(data_df) - 1, "datetime"] >= self.restore_datetime:
-                break
-
-            self.send_signal(ManualSignal(ManualSignal.Continue))
 
     def plot(self):
         if self.result is not None:
