@@ -9,6 +9,7 @@ from typing import Dict
 app = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*")
 
+back_space_sids: Dict[str, int] = {}
 bs_lock = threading.Lock()
 back_space_locks: Dict[int, threading.Lock] = {}
 
@@ -56,6 +57,7 @@ def health_check():
 
 @socketio.on('connect')
 def handle_connect(space_id: int):
+    # 单例模式创建锁
     if space_id not in back_space_locks:
         bs_lock.acquire()
         if space_id not in back_space_locks:
@@ -66,13 +68,13 @@ def handle_connect(space_id: int):
     if not acquired:
         emit('connection_rejected', {'reason': '该回测空间已在运行中，无法打开'})
         disconnect(request.sid)  # 断开连接
+    # 将该连接绑定回测空间
+    back_space_sids[request.sid] = space_id
 
 @socketio.on('disconnect')
 def handle_disconnect():
-    """
-    处理客户端断开连接事件
-    """
-    print('Client disconnected')
+    if request.sid in back_space_sids and back_space_sids[request.sid] in back_space_locks:
+        back_space_locks[back_space_sids[request.sid]].release()
 
 @socketio.on('message')
 def handle_message(data):
