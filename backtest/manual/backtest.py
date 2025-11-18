@@ -1,4 +1,5 @@
 import datetime
+import json
 from queue import Queue
 import backtrader as bt
 import pandas as pd
@@ -74,6 +75,13 @@ class ManualStrategyPosition:
     def get_arg(self, key):
         return self.args.get(key, None)
 
+    @classmethod
+    def from_dict(cls, data_dict: Dict):
+        return cls(**data_dict)
+
+    def to_dict(self):
+        return self.args.copy()
+
 class ManualStrategy(AbstractStrategy):
     def __init__(self, signal_queue: Queue[ManualSignal], info_queue: Queue[ManualStrategyInfo]):
         super().__init__()
@@ -103,7 +111,8 @@ class ManualStrategy(AbstractStrategy):
         sorted(completed_positions, key=lambda x: x.get_position().get_open_order().created)
 
         # 输出策略信息
-        info = ManualStrategyInfo(data=data_df, market_index=market_index_df, industry_index=industry_index_df,
+        info = ManualStrategyInfo(current_time=data_df.loc[len(data_df) - 1, "datetime"],
+                                  data=data_df, market_index=market_index_df, industry_index=industry_index_df,
                                   position_running=position_running, completed_positions=completed_positions)
         return info
 
