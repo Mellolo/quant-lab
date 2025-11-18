@@ -1,27 +1,31 @@
 from flask import Flask, jsonify, request
-from flask_socketio import SocketIO, emit
+from flask_socketio import SocketIO, emit, disconnect
+from io import StringIO
+import pandas as pd
+import service.backService as backService
+import threading
+from typing import Dict
 
 app = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*")
 
+bs_lock = threading.Lock()
+back_space_locks: Dict[int, threading.Lock] = {}
 
-@app.route('/api/create', methods=['POST'])
+@app.route('/api/create/astock', methods=['POST'])
 def create():
-    """
-    示例POST接口，接收并返回JSON数据
-    """
-    # 获取请求体中的JSON数据
-    request_data = request.get_json()
+    # 检查是否有文件在请求中
+    if 'file' not in request.files:
+        return jsonify({"message": "创建回测空间失败，未上传行情csv文件"}), 400
 
-    # 检查是否提供了数据
-    if not request_data:
-        return jsonify({"error": "No data provided"}), 400
+    csv_file = request.files['file']
+    csv_string = csv_file.stream.read().decode('utf-8')
+    csv_data = StringIO(csv_string)
+    df = pd.read_csv(csv_data)
 
-    response_data = {
-        "message": "Data received successfully",
-        "status": "success",
-        "received_data": request_data
-    }
+    backService.create_back_space_astock(df)
+
+    return jsonify({"message": "成功创建回测空间"}), 201
 
 @app.route('/api/data', methods=['POST'])
 def post_data():
@@ -51,12 +55,17 @@ def health_check():
     return jsonify({"status": "healthy"})
 
 @socketio.on('connect')
-def handle_connect():
-    """
-    处理客户端连接事件
-    """
-    print('Client connected')
-    emit('response', {'data': 'Connected successfully'})
+def handle_connect(space_id: int):
+    if space_id not in back_space_locks:
+        bs_lock.acquire()
+        if space_id not in back_space_locks:
+            back_space_locks[space_id] = threading.Lock()
+
+    # 锁定回测空间的连接
+    acquired = back_space_locks[space_id].acquire(blocking=False)
+    if not acquired:
+        emit('connection_rejected', {'reason': '该回测空间已在运行中，无法打开'})
+        disconnect(request.sid)  # 断开连接
 
 @socketio.on('disconnect')
 def handle_disconnect():

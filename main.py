@@ -35,7 +35,7 @@ def run_backtest_with_websocket(engine):
     engine.plot()
 
 if __name__ == '__main__':
-    backtest()
+    # backtest()
     from controller.app import socketio, app
     
     print("启动HTTP服务和WebSocket服务...")
