@@ -134,12 +134,11 @@ class AbstractStrategy(bt.Strategy):
     def get_my_position_id_by_data(self, data, skip_closed =  False):
         result = []
         for order_ref in self._my_position:
-            pos = self._my_position[order_ref]
             if skip_closed:
-                if pos.is_completed() or pos.is_cancelled():
+                if self._my_position[order_ref].is_completed() or self._my_position[order_ref].is_cancelled():
                     continue
 
-            if pos.get_open_order().data == data:
+            if self._my_position[order_ref].get_open_order().data == data:
                 result.append(order_ref)
 
         return result
@@ -165,25 +164,20 @@ class AbstractStrategy(bt.Strategy):
     def next(self):
         if self.broker.__dict__.get("_close_t1", False):
             for order_ref in self._my_position:
-                # 获取仓位
-                pos = self.get_my_position(order_ref)
-
                 # T+1规则下，需要判断开仓订单成交的后一天才可以设置止盈止损
-                open_order = pos.get_open_order()
+                open_order = self._my_position[order_ref].get_open_order()
                 if open_order.data.datetime.date(0) <= num2date(open_order.executed.dt).date():
                     continue
 
-                mark_take_profit_t1 = pos.get_mark_take_profit_t1()
+                mark_take_profit_t1 = self._my_position[order_ref].get_mark_take_profit_t1()
                 if mark_take_profit_t1 is not None:
                     self.take_profit(order_ref, mark_take_profit_t1)
-                    pos.clear_mark_take_profit_t1()
+                    self._my_position[order_ref].clear_mark_take_profit_t1()
 
-                mark_stop_loss_t1 = pos.get_mark_stop_loss_t1()
+                mark_stop_loss_t1 = self._my_position[order_ref].get_mark_stop_loss_t1()
                 if mark_stop_loss_t1 is not None:
                     self.stop_loss(order_ref, mark_stop_loss_t1)
-                    pos.clear_mark_stop_loss_t1()
-
-                self._my_position[order_ref] = pos
+                    self._my_position[order_ref].clear_mark_stop_loss_t1()
 
         self.handle_data()
 
@@ -256,7 +250,7 @@ class AbstractStrategy(bt.Strategy):
     def take_profit(self, order_ref, target_price):
         # 获取仓位
         pos = self.get_my_position(order_ref)
-        if not pos:
+        if pos is None:
             raise ValueError(f"设置止盈单但未找到仓位，开仓订单编号: {order_ref}")
 
         # 获取开仓订单
@@ -289,18 +283,15 @@ class AbstractStrategy(bt.Strategy):
                 take_profit_order = self.sell(data=data, size=size, price=target_price, exectype=bt.Order.Limit)
             else:
                 take_profit_order = self.buy(data=data, size=size, price=target_price, exectype=bt.Order.Limit)
-            pos.set_take_profit_order(take_profit_order)
+            self._my_position[order_ref].set_take_profit_order(take_profit_order)
         else:
             # 设置止盈目标，等待notify_order中取消完成后再创建
-            pos.set_mark_take_profit(target_price)
-
-        # 更新仓位
-        self._my_position[order_ref] = pos
+            self._my_position[order_ref].set_mark_take_profit(target_price)
 
     def cancel_take_profit(self, order_ref):
         # 获取仓位
         pos = self.get_my_position(order_ref)
-        if not pos:
+        if pos is None:
             raise ValueError(f"取消止盈单但未找到仓位，开仓订单编号: {order_ref}")
 
         # 获取开仓订单
@@ -309,24 +300,20 @@ class AbstractStrategy(bt.Strategy):
             raise ValueError(f"取消止盈单但未找到开仓订单，开仓订单编号: {order_ref}")
 
         # 不再需要notify处理标记
-        pos.clear_mark_take_profit()
+        self._my_position[order_ref].clear_mark_take_profit()
 
         # 取消之前设置的止盈单
         take_profit_order = pos.get_take_profit_order()
         if take_profit_order is not None:
             self.cancel(take_profit_order)
-            # 更新仓位
-            self._my_position[order_ref] = pos
             return True
         else:
-            # 更新仓位
-            self._my_position[order_ref] = pos
             return False
 
     def stop_loss(self, order_ref, stop_price):
         # 获取仓位
         pos = self.get_my_position(order_ref)
-        if not pos:
+        if pos is None:
             raise ValueError(f"设置止损单但未找到仓位，开仓订单编号: {order_ref}")
 
         # 获取开仓订单
@@ -359,13 +346,10 @@ class AbstractStrategy(bt.Strategy):
                 stop_loss_order = self.sell(data=data, size=size, price=stop_price, exectype=bt.Order.Stop)
             else:
                 stop_loss_order = self.buy(data=data, size=size, price=stop_price, exectype=bt.Order.Stop)
-            pos.set_stop_loss_order(stop_loss_order)
+            self._my_position[order_ref].set_stop_loss_order(stop_loss_order)
         else:
             # 设置止损目标，等待notify_order中取消完成后再创建
-            pos.set_mark_stop_loss(stop_price)
-
-        # 更新仓位
-        self._my_position[order_ref] = pos
+            self._my_position[order_ref].set_mark_stop_loss(stop_price)
 
     def cancel_stop_loss(self, order_ref):
         # 获取仓位
@@ -379,24 +363,20 @@ class AbstractStrategy(bt.Strategy):
             raise ValueError(f"取消止损单但未找到开仓订单，开仓订单编号: {order_ref}")
 
         # 不再需要notify处理标记
-        pos.clear_mark_stop_loss()
+        self._my_position[order_ref].clear_mark_stop_loss()
 
         # 取消之前设置的止损单
         stop_loss_order = pos.get_stop_loss_order()
         if stop_loss_order is not None:
             self.cancel(stop_loss_order)
-            # 更新仓位
-            self._my_position[order_ref] = pos
             return True
         else:
-            # 更新仓位
-            self._my_position[order_ref] = pos
             return False
 
     def cancel_order(self, order_ref):
         # 获取仓位
         pos = self.get_my_position(order_ref)
-        if not pos:
+        if pos is None:
             raise ValueError(f"取消开仓但未找到仓位，开仓订单编号: {order_ref}")
 
         # 获取开仓订单
@@ -409,7 +389,7 @@ class AbstractStrategy(bt.Strategy):
     def close_position(self, order_ref):
         # 获取仓位
         pos = self.get_my_position(order_ref)
-        if not pos:
+        if pos is None:
             raise ValueError(f"平仓但未找到仓位，开仓订单编号: {order_ref}")
 
         # 获取开仓订单
@@ -443,13 +423,10 @@ class AbstractStrategy(bt.Strategy):
                 close_order = self.sell(data=data, size=size, exectype=bt.Order.Market)
             else:
                 close_order = self.buy(data=data, size=size, exectype=bt.Order.Market)
-            pos.set_close_order(close_order)
+            self._my_position[order_ref].set_close_order(close_order)
         else:
             # 设置平仓目标，等待notify_order中该仓位所有的止盈止损都取消后再创建
-            pos.set_mark_close(True)
-
-        # 更新仓位
-        self._my_position[order_ref] = pos
+            self._my_position[order_ref].set_mark_close(True)
 
     def _notify_order_type(self, order):
         if order.ref in self._my_position:
