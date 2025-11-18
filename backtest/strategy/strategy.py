@@ -25,49 +25,41 @@ class SinglePosition:
     def get_open_order(self):
         return self.open_order
 
+    # 止盈单
     def get_take_profit_order(self):
         return self.take_profit_order
-
-    def get_stop_loss_order(self):
-        return self.stop_loss_order
-
-    def get_close_order(self):
-        return self.close_order
 
     def set_take_profit_order(self, order: bt.Order):
         self.take_profit_order = order
 
+    def clear_take_profit_order(self):
+        self.take_profit_order = None
+
+    # 止损单
+    def get_stop_loss_order(self):
+        return self.stop_loss_order
+
     def set_stop_loss_order(self, order: bt.Order):
         self.stop_loss_order = order
+
+    def clear_stop_loss_order(self):
+        self.stop_loss_order = None
+
+    # 平仓单
+    def get_close_order(self):
+        return self.close_order
 
     def set_close_order(self, order: bt.Order):
         self.close_order = order
 
-    def clear_take_profit_order(self):
-        self.take_profit_order = None
-
-    def clear_stop_loss_order(self):
-        self.take_profit_order = None
-
     def clear_close_order(self):
-        self.take_profit_order = None
+        self.close_order = None
     ############ 订单 ############
 
     ############ 标记 ############
+    # 止盈标记
     def get_mark_take_profit(self):
         return self.mark_take_profit
-
-    def get_mark_take_profit_t1(self):
-        return self.mark_take_profit_t1
-
-    def get_mark_stop_loss(self):
-        return self.mark_stop_loss
-
-    def get_mark_stop_loss_t1(self):
-        return self.mark_stop_loss_t1
-
-    def get_mark_close(self):
-        return self.mark_close
 
     def set_mark_take_profit(self, price: float):
         self.mark_take_profit = price
@@ -75,11 +67,19 @@ class SinglePosition:
     def clear_mark_take_profit(self):
         self.mark_take_profit = None
 
+    # t+1止盈标记
+    def get_mark_take_profit_t1(self):
+        return self.mark_take_profit_t1
+
     def set_mark_take_profit_t1(self, price: float):
         self.mark_take_profit_t1 = price
 
     def clear_mark_take_profit_t1(self):
         self.mark_take_profit_t1 = None
+
+    # 止损标记
+    def get_mark_stop_loss(self):
+        return self.mark_stop_loss
 
     def set_mark_stop_loss(self, price: float):
         self.mark_stop_loss = price
@@ -87,26 +87,37 @@ class SinglePosition:
     def clear_mark_stop_loss(self):
         self.mark_stop_loss = None
 
+    # t+1止损标记
+    def get_mark_stop_loss_t1(self):
+        return self.mark_stop_loss_t1
+
     def set_mark_stop_loss_t1(self, price: float):
         self.mark_stop_loss_t1 = price
 
     def clear_mark_stop_loss_t1(self):
         self.mark_stop_loss_t1 = None
 
+    # 平仓标记
+    def get_mark_close(self):
+        return self.mark_close
+
     def set_mark_close(self, is_close: bool):
         self.mark_close = is_close
     ############ 标记 ############
 
     ############ 状态 ############
+    def get_completed_type(self):
+        return self.completed_type
+
     def set_completed(self, completed_type):
         self.completed = True
         self.completed_type = completed_type
 
-    def set_cancelled(self):
-        self.cancelled = True
-
     def is_completed(self):
         return self.completed
+
+    def set_cancelled(self):
+        self.cancelled = True
 
     def is_cancelled(self):
         return self.cancelled
@@ -464,38 +475,36 @@ class AbstractStrategy(bt.Strategy):
     def notify_order(self, order):
         # 获取订单类型
         order_type, position_ref = self._notify_order_type(order)
-        # 获取仓位
-        pos = self.get_my_position(position_ref)
         if order.status in [order.Completed]:
             # 订单已完成
             if order_type == "open":
                 # 非t+1
                 if not self.broker.__dict__.get("_close_t1", False):
                     # 设置止盈
-                    take_profit_price = pos.get_mark_take_profit()
+                    take_profit_price = self._my_position[position_ref].get_mark_take_profit()
                     if take_profit_price is not None:
                         self.take_profit(position_ref, take_profit_price)
                     # 设置止损
-                    stop_loss_price = pos.get_mark_stop_loss()
+                    stop_loss_price = self._my_position[position_ref].get_mark_stop_loss()
                     if stop_loss_price is not None:
                         self.stop_loss(position_ref, stop_loss_price)
                 else:
                     # t+1
                     # 设置止盈
-                    take_profit_price = pos.get_mark_take_profit()
+                    take_profit_price = self._my_position[position_ref].get_mark_take_profit()
                     if take_profit_price is not None:
-                        pos.clear_mark_take_profit()
-                        pos.set_mark_take_profit_t1(take_profit_price)
+                        self._my_position[position_ref].clear_mark_take_profit()
+                        self._my_position[position_ref].set_mark_take_profit_t1(take_profit_price)
                     # 设置止损
-                    stop_loss_price = pos.get_mark_stop_loss()
+                    stop_loss_price = self._my_position[position_ref].get_mark_stop_loss()
                     if stop_loss_price is not None:
-                        pos.clear_mark_stop_loss()
-                        pos.set_mark_stop_loss_t1(stop_loss_price)
+                        self._my_position[position_ref].clear_mark_stop_loss()
+                        self._my_position[position_ref].set_mark_stop_loss_t1(stop_loss_price)
 
             elif order_type in ["close", "take_profit", "stop_loss"]:
                 self.cancel_take_profit(position_ref)
                 self.cancel_stop_loss(position_ref)
-                pos.set_completed(order_type)
+                self._my_position[position_ref].set_completed(order_type)
 
         elif order.status in [order.Partial]:
             # 订单部分成交
@@ -503,42 +512,39 @@ class AbstractStrategy(bt.Strategy):
         elif order.status in [order.Canceled]:
             # 订单被取消
             if order_type == "open":
-                pos.set_cancelled()
+                self._my_position[position_ref].set_cancelled()
 
             if order_type == "take_profit":
-                pos.clear_take_profit_order()
+                self._my_position[position_ref].clear_take_profit_order()
                 # 若有，设置新止盈
-                take_profit_price = pos.get_mark_take_profit()
+                take_profit_price = self._my_position[position_ref].get_mark_take_profit()
                 if take_profit_price is not None:
                     self.take_profit(position_ref, take_profit_price)
 
             if order_type == "stop_loss":
-                pos.clear_stop_loss_order()
+                self._my_position[position_ref].clear_stop_loss_order()
                 # 若有，设置新止损
-                stop_loss_price = pos.get_mark_stop_loss()
+                stop_loss_price = self._my_position[position_ref].get_mark_stop_loss()
                 if stop_loss_price is not None:
                     self.stop_loss(position_ref, stop_loss_price)
 
             if order_type in ["take_profit", "stop_loss"]:
                 # 若止盈止损单都被取消，且设置了平仓目标，则平仓
-                take_profit_order = pos.get_take_profit_order()
-                stop_loss_order = pos.get_stop_loss_order()
+                take_profit_order = self._my_position[position_ref].get_take_profit_order()
+                stop_loss_order = self._my_position[position_ref].get_stop_loss_order()
                 if not take_profit_order and not stop_loss_order:
-                    if pos.get_mark_close():
+                    if self._my_position[position_ref].get_mark_close():
                         self.close_position(position_ref)
 
         elif order.status in [order.Expired]:
             # 订单已过期
             if order_type == "open":
-                pos.set_cancelled()
+                self._my_position[position_ref].set_cancelled()
             if order_type in ["take_profit", "stop_loss", "close"]:
                 self.close_position(order.ref)
         elif order.status in [order.Margin, order.Rejected]:
             # 交易所拒绝了订单
             if order_type == "open":
-                pos.set_cancelled()
+                self._my_position[position_ref].set_cancelled()
             if order_type in ["take_profit", "stop_loss", "close"]:
                 self.close_position(order.ref)
-
-        # 更新仓位信息
-        self._my_position[position_ref] = pos

@@ -33,15 +33,43 @@ class ManualStrategyInfo:
 
 class ManualStrategyPosition:
     def __init__(self, pos: SinglePosition, **kwargs):
-        # 后续可改为更精简的仓位信息
-        self.position = pos
-
         self.args = {}
         for key, val in iter(kwargs.items()):
             self.args[key] = val
 
-    def get_position(self):
-        return self.position
+        # 开仓信息
+        open_order = pos.get_open_order()
+        self.args["is_buy"] = open_order.isbuy()
+        self.args["open_created_price"] = open_order.created.price
+        self.args["open_created_size"] = open_order.created.size
+        self.args["open_created_dt"] = open_order.created.dt
+        if open_order.status == open_order.Completed:
+            self.args["is_executed"] = True
+            self.args["open_executed_price"] = open_order.executed.price
+            self.args["open_executed_size"] = open_order.executed.size
+            self.args["open_executed_dt"] = open_order.executed.dt
+        else:
+            self.args["is_executed"] = False
+
+        # 仓位状态
+        if pos.is_completed():
+            # 已平仓
+            self.args["completed"] = True
+            completed_type = pos.get_completed_type()
+            self.args["completed_type"] = completed_type
+            # 平仓信息
+            if completed_type == "close":
+                self.args["completed_executed_price"] = pos.get_close_order().executed.price
+                self.args["completed_executed_dt"] = pos.get_close_order().executed.dt
+            elif completed_type == "take_profit":
+                self.args["completed_executed_price"] = pos.get_take_profit_order().executed.price
+                self.args["completed_executed_dt"] = pos.get_take_profit_order().executed.dt
+            elif completed_type == "stop_loss":
+                self.args["completed_executed_price"] = pos.get_stop_loss_order().executed.price
+                self.args["completed_executed_dt"] = pos.get_stop_loss_order().executed.dt
+        elif pos.is_cancelled():
+            # 已取消
+            self.args["cancelled"] = True
 
     def get_arg(self, key):
         return self.args.get(key, None)
@@ -65,11 +93,12 @@ class ManualStrategy(AbstractStrategy):
         completed_positions = []
         order_refs = self.get_my_position_id_by_data(self.datas[0])
         for order_ref in order_refs:
-            pos = ManualStrategyPosition(self.get_my_position(order_ref), **self.position_info[order_ref])
-            if pos.get_position().is_completed() or pos.get_position().is_cancelled():
-                completed_positions.append(pos)
+            pos = self.get_my_position(order_ref)
+            manual_strategy_position = ManualStrategyPosition(pos, **self.position_info[order_ref])
+            if pos.is_completed() or pos.is_cancelled():
+                completed_positions.append(manual_strategy_position)
             else:
-                position_running = pos
+                position_running = manual_strategy_position
 
         sorted(completed_positions, key=lambda x: x.get_position().get_open_order().created)
 
