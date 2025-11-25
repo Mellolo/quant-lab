@@ -1,11 +1,10 @@
-from typing import Dict
+from typing import Dict, List
 import pandas as pd
-import threading
 
 from backtest.manual.backtest import ManualBacktestEngine
 
 class BackSpaceStatus:
-    def __init__(self, name="default",dt=None, cash=None, positions=None):
+    def __init__(self, name="default",dt=None, cash=None, positions: List[Dict]=None):
         self.name = name
         self.dt = dt
         self.cash = cash

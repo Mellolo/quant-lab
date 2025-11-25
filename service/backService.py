@@ -12,7 +12,7 @@ def create_back_space_astock(name: str, df: pd.DataFrame):
     start_date = pd.to_datetime(df["datetime"].min()).date()
     end_date = pd.to_datetime(df["datetime"].max()).date()
     df = data_clean(df, start_date, end_date, [("09:30", "11:30"), ("13:00", "15:00")], "5m")
-    status = BackSpaceStatus(name=name, dt=start_date, cash=1000000, positions=[])
+    status = BackSpaceStatus(name=name, dt=start_date, cash=1000000.0, positions=[])
 
     # 写入数据库
     repository = BackSpaceRepository()

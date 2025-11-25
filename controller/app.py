@@ -7,7 +7,7 @@ from typing import Dict
 
 import service.backService as backService
 from backtest.manual.backtest import ManualSignal
-from models.backSqace import BackSpaceConnect
+from models.backSqace import BackSpaceConnect, BackSpaceStatus
 from utils.idLock import IDLockManager
 
 app = Flask(__name__)
@@ -108,6 +108,16 @@ def handle_disconnect():
         return
 
     # 关闭运行中的回测空间
+    connect.engine.stop()
+    info = connect.engine.get_info()
+
+    status = backService.get_back_space(connect.space_id).status
+    for position in info.get_arg('completed_positions',  []):
+        status.positions.append(position.to_dict())
+
+    status.cash = info.get_arg('cash')
+    status.dt = info.get_arg('current_time')
+    backService.update_back_space(connect.space_id, status)
 
     connect_map.pop(request.sid)
 

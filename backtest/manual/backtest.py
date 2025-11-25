@@ -29,8 +29,8 @@ class ManualStrategyInfo:
         for key, val in iter(kwargs.items()):
             self.args[key] = val
 
-    def get_arg(self, key):
-        return self.args.get(key, None)
+    def get_arg(self, key, default=None):
+        return self.args.get(key, default)
 
 class ManualStrategyPosition:
     def __init__(self, pos: SinglePosition, **kwargs):
@@ -87,7 +87,6 @@ class ManualStrategy(AbstractStrategy):
         super().__init__()
         self.signal_queue = signal_queue
         self.info_queue = info_queue
-        self.cash_before_position = 0.
         self.position_info = {}
 
     def get_info(self) -> ManualStrategyInfo:
@@ -111,7 +110,7 @@ class ManualStrategy(AbstractStrategy):
         sorted(completed_positions, key=lambda x: x.get_position().get_open_order().created)
 
         # 输出策略信息
-        info = ManualStrategyInfo(current_time=data_df.loc[len(data_df) - 1, "datetime"],
+        info = ManualStrategyInfo(current_time=data_df.loc[len(data_df) - 1, "datetime"], cash= self.broker.getcash(),
                                   data=data_df, market_index=market_index_df, industry_index=industry_index_df,
                                   position_running=position_running, completed_positions=completed_positions)
         return info
@@ -125,9 +124,6 @@ class ManualStrategy(AbstractStrategy):
         order_refs = self.get_my_position_id_by_data(data, skip_closed=True)
         if len(order_refs) >= 1:
             my_position_id = order_refs[0]
-        else:
-            # 无仓位情况下，记录开仓前的现金
-            self.cash_before_position = self.broker.getcash()
 
         # 接收外部信号
         signal = self.signal_queue.get()
