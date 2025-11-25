@@ -173,7 +173,7 @@ class ManualStrategy(AbstractStrategy):
         self.info_queue.put(ManualStrategyInfo(stop=True))
 
 class ManualBacktestEngine:
-    def __init__(self, broker = AStockBroker(), cash = 10000.0, commission=0.001, from_datetime: pd.Timestamp = None):
+    def __init__(self, broker = AStockBroker(), cash = 1000000.0, commission=0.001, from_datetime: pd.Timestamp = None):
         # 回测开始的时间
         self.from_datetime = from_datetime
 
@@ -243,6 +243,22 @@ class ManualBacktestEngine:
                 if data_df.loc[len(data_df) - 1, "datetime"] >= self.from_datetime:
                     break
                 self.send_signal(ManualSignal(ManualSignal.Continue))
+
+    def stop(self):
+        if self.get_info() is None:
+            return
+
+        position_running = self.get_info().get_arg("position_running")
+        if position_running is None:
+            return
+
+        self.send_signal(ManualSignal(ManualSignal.Close))
+        while True:
+            position_running = self.get_info().get_arg("position_running")
+            if position_running is not None:
+                self.send_signal(ManualSignal(ManualSignal.Continue))
+            else:
+                break
 
     def plot(self):
         if self.result is not None:

@@ -6,6 +6,7 @@ import pandas as pd
 from typing import Dict
 
 import service.backService as backService
+from backtest.manual.backtest import ManualSignal
 from models.backSqace import BackSpaceConnect
 from utils.idLock import IDLockManager
 
@@ -72,14 +73,16 @@ def handle_connect(space_id: int):
         if connect.space_id == space_id:
             emit('connection_rejected', {'reason': '该回测空间已在运行中，无法打开'})
             disconnect(request.sid)  # 断开连接
+            return
     # double check
     connect_lock.acquire_lock(space_id)
     for connect in connect_map.values():
         if connect.space_id == space_id:
             emit('connection_rejected', {'reason': '该回测空间已在运行中，无法打开'})
-            disconnect(request.sid)  # 断开连接
             # 释放锁
             connect_lock.release_lock(space_id)
+            disconnect(request.sid)  # 断开连接
+            return
 
     # 创建运行中的回测空间
     back_space = backService.get_back_space(space_id)
@@ -112,6 +115,21 @@ def handle_disconnect():
     connect_lock.release_lock(connect.space_id)
 
 @socketio.on('signal')
-def handle_message(signal):
-    json.loads(signal)
-    emit('response', {'data': f"Server received: {data}"})
+def handle_message(data):
+    connect = connect_map.get(request.sid, None)
+    if connect is None:
+        emit('connection_rejected', {'reason': '该回测空间不存在，无法打开'})
+        disconnect(request.sid)  # 断开连接
+        return
+
+    # 加锁
+    connect_lock.acquire_lock(connect.space_id)
+
+    data_dict = json.loads(data)
+    signal = ManualSignal(data_dict.get('type', ManualSignal.Continue), **data_dict.get('args', {}))
+    connect.engine.send_signal(signal)
+    info = connect.engine.get_info()
+    emit('response', {'data': info.args})
+
+    # 释放锁
+    connect_lock.release_lock(connect.space_id)
