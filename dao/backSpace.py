@@ -37,7 +37,7 @@ class BackSpaceRepository:
     Repository class for accessing back_space table
     """
 
-    def __init__(self, db_path: str = "backtest.db"):
+    def __init__(self, db_path: str = "mysql://192.168.5.178:33306/quant?allowPublicKeyRetrieval=true&useSSL=false"):
         """
         Initialize repository with database path
 
