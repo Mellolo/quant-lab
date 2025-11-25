@@ -1,4 +1,4 @@
-import sqlite3
+import pymysql
 from typing import List, Optional
 
 class BackSpaceRecord:
@@ -37,14 +37,33 @@ class BackSpaceRepository:
     Repository class for accessing back_space table
     """
 
-    def __init__(self, db_path: str = "mysql://192.168.5.178:33306/quant?allowPublicKeyRetrieval=true&useSSL=false"):
+    def __init__(self, db_config: dict = None):
         """
-        Initialize repository with database path
+        Initialize repository with database configuration
 
         Args:
-            db_path (str): Path to SQLite database file
+            db_config (dict): MySQL database configuration
         """
-        self.db_path = db_path
+        if db_config is None:
+            self.db_config = {
+                'host': '192.168.5.178',
+                'port': 33306,
+                'user': 'quant',
+                'password': 'quant',
+                'database': 'quant',
+                'charset': 'utf8mb4'
+            }
+        else:
+            self.db_config = db_config
+
+    def _get_connection(self):
+        """
+        Get a new MySQL database connection
+        
+        Returns:
+            pymysql.Connection: MySQL database connection
+        """
+        return pymysql.connect(**self.db_config)
 
     def create(self, back_space: BackSpaceRecord) -> BackSpaceRecord:
         """
@@ -56,14 +75,17 @@ class BackSpaceRepository:
         Returns:
             BackSpaceRecord: Created BackSpace object with assigned id
         """
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "INSERT INTO back_space (data, status) VALUES (?, ?)",
-                (back_space.data, back_space.status)
-            )
-            conn.commit()
-            back_space.id = cursor.lastrowid
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "INSERT INTO back_space (data, status) VALUES (%s, %s)",
+                    (back_space.data, back_space.status)
+                )
+                conn.commit()
+                back_space.id = cursor.lastrowid
+        finally:
+            conn.close()
         return back_space
 
     def get_by_id(self, id: int) -> Optional[BackSpaceRecord]:
@@ -76,14 +98,17 @@ class BackSpaceRepository:
         Returns:
             Optional[BackSpaceRecord]: BackSpace object if found, None otherwise
         """
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT id, data, status FROM back_space WHERE id = ?", (id,))
-            row = cursor.fetchone()
-
-        if row:
-            return BackSpaceRecord(id=row[0], data=row[1], status=row[2])
-        return None
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT id, data, status FROM back_space WHERE id = %s", (id,))
+                row = cursor.fetchone()
+                
+            if row:
+                return BackSpaceRecord(id=row[0], data=row[1], status=row[2])
+            return None
+        finally:
+            conn.close()
 
     def get_all(self) -> List[BackSpaceRecord]:
         """
@@ -92,12 +117,15 @@ class BackSpaceRepository:
         Returns:
             List[BackSpaceRecord]: List of all BackSpace objects
         """
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT id, data, status FROM back_space")
-            rows = cursor.fetchall()
-
-        return [BackSpaceRecord(id=row[0], data=row[1], status=row[2]) for row in rows]
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT id, data, status FROM back_space")
+                rows = cursor.fetchall()
+                
+            return [BackSpaceRecord(id=row[0], data=row[1], status=row[2]) for row in rows]
+        finally:
+            conn.close()
 
     def update(self, back_space: BackSpaceRecord) -> bool:
         """
@@ -109,14 +137,17 @@ class BackSpaceRepository:
         Returns:
             bool: True if record was updated, False if record was not found
         """
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "UPDATE back_space SET data = ?, status = ? WHERE id = ?",
-                (back_space.data, back_space.status, back_space.id)
-            )
-            conn.commit()
-            return cursor.rowcount > 0
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE back_space SET data = %s, status = %s WHERE id = %s",
+                    (back_space.data, back_space.status, back_space.id)
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+        finally:
+            conn.close()
 
     def delete(self, id: int) -> bool:
         """
@@ -128,8 +159,11 @@ class BackSpaceRepository:
         Returns:
             bool: True if record was deleted, False if record was not found
         """
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute("DELETE FROM back_space WHERE id = ?", (id,))
-            conn.commit()
-            return cursor.rowcount > 0
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("DELETE FROM back_space WHERE id = %s", (id,))
+                conn.commit()
+                return cursor.rowcount > 0
+        finally:
+            conn.close()
