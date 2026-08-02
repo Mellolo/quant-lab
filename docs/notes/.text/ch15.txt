@@ -1,0 +1,419 @@
+CHAPTER 15
+
+
+
+
+       Understanding Strategy Risk
+
+
+
+
+15.1   MOTIVATION
+
+As we saw in Chapters 3 and 13, investment strategies are often implemented in terms
+of positions held until one of two conditions are met: (1) a condition to exit the posi-
+tion with profits (profit-taking), or (2) a condition to exit the position with losses (stop-
+loss). Even when a strategy does not explicitly declare a stop-loss, there is always
+an implicit stop-loss limit, at which the investor can no longer finance her position
+(margin call) or bear the pain caused by an increasing unrealized loss. Because most
+strategies have (implicitly or explicitly) these two exit conditions, it makes sense to
+model the distribution of outcomes through a binomial process. This in turn will help
+us understand what combinations of betting frequency, odds, and payouts are uneco-
+nomic. The goal of this chapter is to help you evaluate when a strategy is vulnerable
+to small changes in any of these variables.
+
+
+
+15.2   SYMMETRIC PAYOUTS
+
+Consider a strategy that produces n IID bets per year, where the outcome Xi of a
+bet i ∈ [1, n] is a profit 𝜋 > 0 with probability P[Xi = 𝜋] = p, and a loss −𝜋 with
+probability P[Xi = −𝜋] = 1 − p. You can think of p as the precision of a binary
+classifier where a positive means betting on an opportunity, and a negative means
+passing on an opportunity: True positives are rewarded, false positives are pun-
+ished, and negatives (whether true or false) have no payout. Since the betting out-
+comes {Xi }i=1,…,n are independent, we will compute the expected moments per
+bet. The expected profit from one bet is E[Xi ] = 𝜋p + (−𝜋)(1 − p) = 𝜋(2p − 1). The
+variance is V[Xi ] = E[Xi2 ] − E[Xi ]2 , where E[Xi2 ] = 𝜋 2 p + (−𝜋)2 (1 − p) = 𝜋 2 , thus
+
+
+                                                                                        211
+212                                                             UNDERSTANDING STRATEGY RISK
+
+
+V[Xi ] = 𝜋 2 − 𝜋 2 (2p − 1)2 = 𝜋 2 [1 − (2p − 1)2 ] = 4𝜋 2 p(1 − p). For n IID bets per
+year, the annualized Sharpe ratio (𝜃) is
+
+                                    nE[Xi ]     2p − 1 √
+                         𝜃[p, n] = √         = √          n
+                                     nV[Xi ]  2 p(1 − p)
+                                              ⏟⏞⏞⏞⏞⏟⏞⏞⏞⏞⏟
+                                                         t−value of p
+                                                       under H0 : p = 12
+
+    Note how 𝜋 cancels out of the above equation, because the payouts are symmet-
+ric. Just as in the Gaussian case, 𝜃[p, n] can be understood as a re-scaled t-value.
+This illustrates the point that, even for a small p > 12 , the Sharpe ratio can be made
+high for a sufficiently large n. This is the economic basis for high-frequency trading,
+where p can be barely above .5, and the key to a successful business is to increase
+n. The Sharpe ratio is a function of precision rather than accuracy, because passing
+on an opportunity (a negative) is not rewarded or punished directly (although too
+many negatives may lead to a small n, which will depress the Sharpe ratio toward
+zero).
+                                  2p−1
+    For example, for p = .55, √           = 0.1005, and achieving an annualized Sharpe
+                                   2 p(1−p)
+ratio of 2 requires 396 bets per year. Snippet 15.1 verifies this result experimen-
+tally. Figure 15.1 plots the Sharpe ratio as a function of precision, for various betting
+frequencies.
+
+
+
+
+      2.0       n=0
+                n=25
+      1.5       n=50
+                n=75
+      1.0       n=100
+
+      0.5
+
+      0.0
+
+   –0.5
+
+   –1.0
+
+   –1.5
+
+   –2.0
+
+            0.400   0.425     0.450      0.475     0.500       0.525       0.550   0.575      0.600
+
+FIGURE 15.1     The relation between precision (x-axis) and sharpe ratio (y-axis) for various bet frequen-
+cies (n)
+ASYMMETRIC PAYOUTS                                                                    213
+
+
+SNIPPET 15.1 TARGETING A SHARPE RATIO AS A FUNCTION OF
+THE NUMBER OF BETS
+out,p=[],.55
+for i in xrange(1000000):
+    rnd=np.random.binomial(n=1,p=p)
+    x=(1 if rnd==1 else -1)
+    out.append(x)
+print np.mean(out),np.std(out),np.mean(out)/np.std(out)
+
+
+
+
+   Solving for 0 ≤ p ≤ 1, we obtain −4p2 + 4p − 𝜃2n+n = 0, with solution
+
+                                       (  √                  )
+                                   1                   n
+                              p=        1+ 1−
+                                   2                𝜃2 + n
+
+   This equation makes explicit the trade-off between precision (p) and frequency
+(n) for a given Sharpe ratio (𝜃). For example, a strategy that only produces weekly
+bets (n = 52) will need a fairly high precision of p = 0.6336 to deliver an annualized
+Sharpe of 2.
+
+
+15.3   ASYMMETRIC PAYOUTS
+
+Consider a strategy that produces n IID bets per year, where the outcome Xi
+of a bet i ∈ [1, n] is 𝜋+ with probability P[Xi = 𝜋+ ] = p, and an outcome 𝜋− ,
+𝜋− < 𝜋+ occurs with probability P[Xi = 𝜋− ] = 1 − p. The expected profit from
+one bet is E[Xi ] = p𝜋+ + (1 − p)𝜋− = (𝜋+ − 𝜋− )p + 𝜋− . The variance is V[Xi ] =
+E[Xi2 ] − E[Xi ]2 , where E[Xi2 ] = p𝜋+2 + (1 − p)𝜋−2 = (𝜋+2 − 𝜋−2 )p + 𝜋−2 , thus V[Xi ] =
+(𝜋+ − 𝜋− )2 p(1 − p). For n IID bets per year, the annualized Sharpe ratio (𝜃) is
+
+                                    nE[Xi ]    (𝜋+ − 𝜋− )p + 𝜋− √
+               𝜃[p, n, 𝜋− , 𝜋+ ] = √        =          √          n
+                                     nV[Xi ] (𝜋+ − 𝜋− ) p(1 − p)
+
+   And for 𝜋− = −𝜋+ we can see that this equation reduces to the symmetric
+                           2𝜋+ p+𝜋+ √    2p−1 √
+case: 𝜃[p, n, −𝜋+ , 𝜋+ ] =   √       n= √      n = 𝜃[p, n]. For example, for
+                           2𝜋+ p(1−p)           2 p(1−p)
+n = 260, 𝜋− = −.01, 𝜋+ = .005, p = .7, we get 𝜃 = 1.173.
+   Finally, we can solve the previous equation for 0 ≤ p ≤ 1, to obtain
+                                               √
+                                        −b +     b2 − 4ac
+                                 p=
+                                                2a
+ 214                                                  UNDERSTANDING STRATEGY RISK
+
+ where:
+
+    r a = (n + 𝜃 2 )(𝜋+ − 𝜋− )2
+    r b = [2n𝜋− − 𝜃 2 (𝜋+ − 𝜋− )] (𝜋+ − 𝜋− )
+    r c = n𝜋 2
+              −
+
+    As a side note, Snippet 15.2 verifies these symbolic operations using SymPy Live:
+ http://live.sympy.org/.
+
+
+
+ SNIPPET 15.2 USING THE SymPy LIBRARY FOR SYMBOLIC
+ OPERATIONS
+ >>> from sympy import *
+ >>> init_printing(use_unicode=False,wrap_line=False,no_global=True)
+ >>> p,u,d=symbols('p u d')
+ >>> m2=p*u**2+(1-p)*d**2
+ >>> m1=p*u+(1-p)*d
+ >>> v=m2-m1**2
+ >>> factor(v)
+
+
+
+     The above equation answers the following question: Given a trading rule charac-
+ terized by parameters {𝜋− , 𝜋+ , n}, what is the precision rate p required to achieve a
+ Sharpe ratio of 𝜃 ∗ ? For example, for n = 260, 𝜋− = −.01, 𝜋+ = .005, in order to get
+ 𝜃 = 2 we require a p = .72. Thanks to the large number of bets, a very small change
+ in p (from p = .7 to p = .72) has propelled the Sharpe ratio from 𝜃 = 1.173 to 𝜃 = 2.
+ On the other hand, this also tells us that the strategy is vulnerable to small changes in
+ p. Snippet 15.3 implements the derivation of the implied precision. Figure 15.2 dis-
+ plays the implied precision as a function of n and 𝜋− , where 𝜋+ = 0.1 and 𝜃 ∗ = 1.5.
+ As 𝜋− becomes more negative for a given n, a higher p is required to achieve 𝜃 ∗ for
+ a given 𝜋+ . As n becomes smaller for a given 𝜋− , a higher p is required to achieve 𝜃 ∗
+ for a given 𝜋+ .
+
+
+
+ SNIPPET 15.3       COMPUTING THE IMPLIED PRECISION
+def binHR(sl,pt,freq,tSR):
+    ’’’
+    Given a trading rule characterized by the parameters {sl,pt,freq},
+    what's the min precision p required to achieve a Sharpe ratio tSR?
+    1) Inputs
+    sl: stop loss threshold
+    pt: profit taking threshold
+    freq: number of bets per year
+   ASYMMETRIC PAYOUTS                                                                                 215
+
+
+
+
+   FIGURE 15.2    Heat-map of the implied precision as a function of n and 𝜋− , with 𝜋+ = 0.1 and 𝜃 ∗ = 1.5
+
+
+      tSR: target annual Sharpe ratio
+      2) Output
+      p: the min precision rate p required to achieve tSR
+      ’’’
+      a=(freq+tSR**2)*(pt-sl)**2
+      b=(2*freq*sl-tSR**2*(pt-sl))*(pt-sl)
+      c=freq*sl**2
+      p=(-b+(b**2–4*a*c)**.5)/(2.*a)
+      return p
+
+
+
+      Snippet 15.4 solves 𝜃[p, n, 𝜋− , 𝜋+ ] for the implied betting frequency, n. Figure 15.3
+   plots the implied frequency as a function of p and 𝜋− , where 𝜋+ = 0.1 and 𝜃 ∗ = 1.5.
+   As 𝜋− becomes more negative for a given p, a higher n is required to achieve 𝜃 ∗ for
+   a given 𝜋+ . As p becomes smaller for a given 𝜋− , a higher n is required to achieve 𝜃 ∗
+   for a given 𝜋+ .
+
+
+
+   SNIPPET 15.4        COMPUTING THE IMPLIED BETTING FREQUENCY
+def binFreq(sl,pt,p,tSR):
+      ’’’
+      Given a trading rule characterized by the parameters {sl,pt,freq},
+      what's the number of bets/year needed to achieve a Sharpe ratio
+      tSR with precision rate p?
+      Note: Equation with radicals, check for extraneous solution.
+216                                                       UNDERSTANDING STRATEGY RISK
+
+
+
+
+          FIGURE 15.3    Implied frequency as a function of p and, with = 0.1 and = 1.5
+
+
+   1) Inputs
+   sl: stop loss threshold
+   pt: profit taking threshold
+   p: precision rate p
+   tSR: target annual Sharpe ratio
+   2) Output
+   freq: number of bets per year needed
+   ’’’
+   freq=(tSR*(pt-sl))**2*p*(1-p)/((pt-sl)*p+sl)**2 # possible extraneous
+   if not np.isclose(binSR(sl,pt,freq,p),tSR):return
+   return freq
+
+
+
+
+15.4   THE PROBABILITY OF STRATEGY FAILURE
+
+In the example above, parameters 𝜋− = −.01, 𝜋+ = .005 are set by the portfolio man-
+ager, and passed to the traders with the execution orders. Parameter n = 260 is also set
+by the portfolio manager, as she decides what constitutes an opportunity worth bet-
+ting on. The two parameters that are not under the control of the portfolio manager
+are p (determined by the market) and 𝜃 ∗ (the objective set by the investor). Because
+p is unknown, we can model it as a random variable, with expected value E [p]. Let
+us define p𝜃∗ as the value of p below which the strategy will underperform a target
+Sharpe ratio 𝜃 ∗ , that is, p𝜃∗ = max{p|𝜃 ≤ 𝜃 ∗ }. We can use the equations above (or the
+                                                   2
+binHR function) to conclude that for p𝜃 ∗ =0 = , p < p𝜃 ∗ =0 ⇒ 𝜃 ≤ 0. This highlights
+                                                   3
+THE PROBABILITY OF STRATEGY FAILURE                                                       217
+
+the risks involved in this strategy, because a relatively small drop in p (from p = .7
+to p = .67) will wipe out all the profits. The strategy is intrinsically risky, even if the
+holdings are not. That is the critical difference we wish to establish with this chapter:
+Strategy risk should not be confused with portfolio risk.
+    Most firms and investors compute, monitor, and report portfolio risk without real-
+izing that this tells us nothing about the risk of the strategy itself. Strategy risk is not
+the risk of the underlying portfolio, as computed by the chief risk officer. Strategy risk
+is the risk that the investment strategy will fail to succeed over time, a question of far
+greater relevance to the chief investment officer. The answer to the question “What
+is the probability that this strategy will fail?” is equivalent to computing P[p < p𝜃∗ ].
+The following algorithm will help us compute the strategy risk.
+
+
+15.4.1   Algorithm
+In this section we will describe a procedure to compute P[p < p𝜃∗ ]. Given a time
+series of bet outcomes {𝜋t }t=1,…,T , first we estimate 𝜋− = E[{𝜋t |𝜋t ≤ 0}t=1,…,T ], and
+𝜋+ = E[{𝜋t |𝜋t > 0}t=1,…,T ]. Alternatively, {𝜋− , 𝜋+ } could be derived from fitting a
+mixture of two Gaussians, using the EF3M algorithm (López de Prado and Foreman
+[2014]). Second, the annual frequency n is given by n = Ty , where y is the number of
+years elapsed between t = 1 and t = T. Third, we bootstrap the distribution of p as
+follows:
+
+   1. For iterations i = 1, … , I:
+      (a) Draw ⌊nk⌋ samples from {𝜋t }t=1,…,T with replacement, where k is the num-
+          ber of years used by investors to assess a strategy (e.g., 2 years). We denote
+          the set of these drawn samples as {𝜋j(i) }j=1,…,⌊nk⌋ .
+      (b) Derive the observed              precision     from     iteration    i    as    pi =
+           1
+          ⌊nk⌋
+               ‖{𝜋j(i) |𝜋j(i) > 0}          ‖.
+                                 j=1,…,⌊nk⌋
+   2. Fit the PDF of p, denoted f [p], by applying a Kernel Density Estimator (KDE)
+      on {pi }i=1,…,I .
+
+   For a sufficiently large k, we can approximate this third step as f [p] ∼
+N[̄p, p̄ (1 − p̄ )], where p̄ = E[p] = T1 ‖{𝜋t(i) |𝜋t(i) > 0}t=1,…,T ‖. Fourth, given a thresh-
+old 𝜃 ∗ (the Sharpe ratio that separates failure from success), derive p𝜃∗ (see Sec-
+                                                                           p𝜃 ∗
+tion 15.4). Fifth, the strategy risk is computed as P[p < p𝜃∗ ] = ∫−∞           f [p]dp.
+
+15.4.2   Implementation
+Snippet 15.5 lists one possible implementation of this algorithm. Typically we would
+disregard strategies where P[p < p𝜃∗ ] > .05 as too risky, even if they invest in low
+volatility instruments. The reason is that even if they do not lose much money, the
+probability that they will fail to achieve their target is too high. In order to be deployed,
+the strategy developer must find a way to reduce p𝜃∗ .
+218                                                 UNDERSTANDING STRATEGY RISK
+
+
+
+
+SNIPPET 15.5      CALCULATING THE STRATEGY RISK IN PRACTICE
+import numpy as np,scipy.stats as ss
+#———————————————————————————————————————
+def mixGaussians(mu1,mu2,sigma1,sigma2,prob1,nObs):
+    # Random draws from a mixture of gaussians
+    ret1=np.random.normal(mu1,sigma1,size=int(nObs*prob1))
+    ret2=np.random.normal(mu2,sigma2,size=int(nObs)-ret1.shape[0])
+    ret=np.append(ret1,ret2,axis=0)
+    np.random.shuffle(ret)
+    return ret
+#———————————————————————————————————————
+def probFailure(ret,freq,tSR):
+    # Derive probability that strategy may fail
+    rPos,rNeg=ret[ret>0].mean(),ret[ret<=0].mean()
+    p=ret[ret>0].shape[0]/float(ret.shape[0])
+    thresP=binHR(rNeg,rPos,freq,tSR)
+    risk=ss.norm.cdf(thresP,p,p*(1-p)) # approximation to bootstrap
+    return risk
+#———————————————————————————————————————
+def main():
+    #1) Parameters
+    mu1,mu2,sigma1,sigma2,prob1,nObs=.05,-.1,.05,.1,.75,2600
+    tSR,freq=2.,260
+    #2) Generate sample from mixture
+    ret=mixGaussians(mu1,mu2,sigma1,sigma2,prob1,nObs)
+    #3) Compute prob failure
+    probF=probFailure(ret,freq,tSR)
+    print 'Prob strategy will fail',probF
+    return
+#———————————————————————————————————————
+if __name__=='__main__':main()
+
+
+
+
+   This approach shares some similarities with PSR (see Chapter 14, and Bailey and
+López de Prado [2012, 2014]). PSR derives the probability that the true Sharpe ratio
+exceeds a given threshold under non-Gaussian returns. Similarly, the method intro-
+duced in this chapter derives the strategy’s probability of failure based on asymmetric
+binary outcomes. The key difference is that, while PSR does not distinguish between
+parameters under or outside the portfolio manager’s control, the method discussed
+here allows the portfolio manager to study the viability of the strategy subject to the
+parameters under her control: {𝜋− , 𝜋+ , n}. This is useful when designing or assessing
+the viability of a trading strategy.
+EXERCISES                                                                           219
+
+EXERCISES
+
+15.1 A portfolio manager intends to launch a strategy that targets an annualized SR of
+     2. Bets have a precision rate of 60%, with weekly frequency. The exit conditions
+     are 2% for profit-taking, and –2% for stop-loss.
+     (a) Is this strategy viable?
+     (b) Ceteris paribus, what is the required precision rate that would make the
+          strategy profitable?
+     (c) For what betting frequency is the target achievable?
+     (d) For what profit-taking threshold is the target achievable?
+     (e) What would be an alternative stop-loss?
+15.2 Following up on the strategy from exercise 1.
+     (a) What is the sensitivity of SR to a 1% change in each parameter?
+     (b) Given these sensitivities, and assuming that all parameters are equally hard
+          to improve, which one offers the lowest hanging fruit?
+     (c) Does changing any of the parameters in exercise 1 impact the others? For
+          example, does changing the betting frequency modify the precision rate,
+          etc.?
+15.3 Suppose a strategy that generates monthly bets over two years, with returns
+     following a mixture of two Gaussian distributions. The first distribution has
+     a mean of –0.1 and a standard deviation of 0.12. The second distribution has
+     a mean of 0.06 and a standard deviation of 0.03. The probability that a draw
+     comes from the first distribution is 0.15.
+     (a) Following López de Prado and Peijan [2004] and López de Prado and Fore-
+          man [2014], derive the first four moments for the mixture’s returns.
+     (b) What is the annualized SR?
+     (c) Using those moments, compute PSR[1] (see Chapter 14). At a 95% confi-
+          dence level, would you discard this strategy?
+15.4 Using Snippet 15.5, compute P[p < p𝜃∗ =1 ] for the strategy described in exercise
+     3. At a significance level of 0.05, would you discard this strategy? Is this result
+     consistent with PSR[𝜃 ∗ ]?
+15.5 In general, what result do you expect to be more accurate, PSR[𝜃 ∗ ] or
+     P[p < p𝜃∗ =1 ]? How are these two methods complementary?
+15.6 Re-examine the results from Chapter 13, in light of what you have learned in
+     this chapter.
+     (a) Does the asymmetry between profit taking and stop-loss thresholds in OTRs
+          make sense?
+     (b) What is the range of p implied by Figure 13.1, for a daily betting frequency?
+     (c) What is the range of p implied by Figure 13.5, for a weekly betting fre-
+          quency?
+220                                                          UNDERSTANDING STRATEGY RISK
+
+REFERENCES
+
+Bailey, D. and M. López de Prado (2014): “The deflated Sharpe ratio: Correcting for selection
+     bias, backtest overfitting and non-normality.” Journal of Portfolio Management, Vol. 40, No.
+     5. Available at https://ssrn.com/abstract=2460551.
+Bailey, D. and M. López de Prado (2012): “The Sharpe ratio efficient frontier.” Journal of Risk, Vol.
+     15, No. 2, pp. 3–44. Available at https://ssrn.com/abstract=1821643.
+López de Prado, M. and M. Foreman (2014): “A mixture of Gaussians approach to mathematical
+     portfolio oversight: The EF3M algorithm.” Quantitative Finance, Vol. 14, No. 5, pp. 913–930.
+     Available at https://ssrn.com/abstract=1931734.
+López de Prado, M. and A. Peijan (2004): “Measuring loss potential of hedge fund strate-
+     gies.” Journal of Alternative Investments, Vol. 7, No. 1 (Summer), pp. 7–31. Available at
+     http://ssrn.com/abstract=641702.

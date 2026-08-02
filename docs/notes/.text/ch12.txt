@@ -1,0 +1,363 @@
+CHAPTER 12
+
+
+
+
+       Backtesting through Cross-Validation
+
+
+
+
+12.1   MOTIVATION
+
+A backtest evaluates out-of-sample the performance of an investment strategy using
+past observations. These past observations can be used in two ways: (1) in a narrow
+sense, to simulate the historical performance of an investment strategy, as if it had
+been run in the past; and (2) in a broader sense, to simulate scenarios that did not
+happen in the past. The first (narrow) approach, also known as walk-forward, is so
+prevalent that, in fact, the term “backtest” has become a de facto synonym for “histor-
+ical simulation.” The second (broader) approach is far less known, and in this chapter
+we will introduce some novel ways to carry it out. Each approach has its pros and
+cons, and each should be given careful consideration.
+
+
+12.2   THE WALK-FORWARD METHOD
+
+The most common backtest method in the literature is the walk-forward (WF)
+approach. WF is a historical simulation of how the strategy would have performed in
+past. Each strategy decision is based on observations that predate that decision. As
+we saw in Chapter 11, carrying out a flawless WF simulation is a daunting task that
+requires extreme knowledge of the data sources, market microstructure, risk manage-
+ment, performance measurement standards (e.g., GIPS), multiple testing methods,
+experimental mathematics, etc. Unfortunately, there is no generic recipe to conduct
+a backtest. To be accurate and representative, each backtest must be customized to
+evaluate the assumptions of a particular strategy.
+   WF enjoys two key advantages: (1) WF has a clear historical interpretation. Its
+performance can be reconciled with paper trading. (2) History is a filtration; hence,
+using trailing data guarantees that the testing set is out-of-sample (no leakage), as
+long as purging has been properly implemented (see Chapter 7, Section 7.4.1). It is a
+                                                                                   161
+162                                       BACKTESTING THROUGH CROSS-VALIDATION
+
+common mistake to find leakage in WF backtests, where t1.index falls within the
+training set, but t1.values fall within the testing set (see Chapter 3). Embargoing is
+not needed in WF backtests, because the training set always predates the testing set.
+
+12.2.1    Pitfalls of the Walk-Forward Method
+WF suffers from three major disadvantages: First, a single scenario is tested (the his-
+torical path), which can be easily overfit (Bailey et al. [2014]). Second, WF is not
+necessarily representative of future performance, as results can be biased by the par-
+ticular sequence of datapoints. Proponents of the WF method typically argue that
+predicting the past would lead to overly optimistic performance estimates. And yet,
+very often fitting an outperforming model on the reversed sequence of observations
+will lead to an underperforming WF backtest. The truth is, it is as easy to overfit a
+walk-forward backtest as to overfit a walk-backward backtest, and the fact that chang-
+ing the sequence of observations yields inconsistent outcomes is evidence of that
+overfitting. If proponents of WF were right, we should observe that walk-backwards
+backtests systematically outperform their walk-forward counterparts. That is not the
+case, hence the main argument in favor of WF is rather weak.
+    To make this second disadvantage clearer, suppose an equity strategy that is back-
+tested with a WF on S&P 500 data, starting January 1, 2007. Until March 15, 2009,
+the mix of rallies and sell-offs will train the strategy to be market neutral, with low
+confidence on every position. After that, the long rally will dominate the dataset, and
+by January 1, 2017, buy forecasts will prevail over sell forecasts. The performance
+would be very different had we played the information backwards, from January 1,
+2017 to January 1, 2007 (a long rally followed by a sharp sell-off). By exploiting a
+particular sequence, a strategy selected by WF may set us up for a debacle.
+    The third disadvantage of WF is that the initial decisions are made on a smaller
+portion of the total sample. Even if a warm-up period is set, most of the information
+is used by only a small portion of the decisions. Consider a strategy with a warm-up
+period)that uses t0 observations out of T. This strategy makes half of its decisions
+(
+ T−t0
+  2
+         on an average number of datapoints,
+
+                  (            )−1 (            )
+                      T − t0             T + t 0 T − t0  1   3
+                                    t0 +                = T + t0
+                        2                  2       4     4   4
+
+                  t
+which is only a 34 T0 + 14 fraction of the observations. Although this problem is atten-
+uated by increasing the warm-up period, doing so also reduces the length of the
+backtest.
+
+
+12.3     THE CROSS-VALIDATION METHOD
+
+Investors often ask how a strategy would perform if subjected to a stress scenario
+as unforeseeable as the 2008 crisis, or the dot-com bubble, or the taper tantrum, or
+THE COMBINATORIAL PURGED CROSS-VALIDATION METHOD                                     163
+
+the China scare of 2015–2016, etc. One way to answer is to split the observations
+into two sets, one with the period we wish to test (testing set), and one with the
+rest (training set). For example, a classifier would be trained on the period January
+1, 2009–January 1, 2017, then tested on the period January 1, 2008–December 31,
+2008. The performance we will obtain for 2008 is not historically accurate, since
+the classifier was trained on data that was only available after 2008. But historical
+accuracy was not the goal of the test. The objective of the test was to subject a strategy
+ignorant of 2008 to a stress scenario such as 2008.
+   The goal of backtesting through cross-validation (CV) is not to derive histori-
+cally accurate performance, but to infer future performance from a number of out-
+of-sample scenarios. For each period of the backtest, we simulate the performance of
+a classifier that knew everything except for that period.
+
+   Advantages
+   1. The test is not the result of a particular (historical) scenario. In fact, CV
+      tests k alternative scenarios, of which only one corresponds with the histori-
+      cal sequence.
+   2. Every decision is made on sets of equal size. This makes outcomes compara-
+      ble across periods, in terms of the amount of information used to make those
+      decisions.
+   3. Every observation is part of one and only one testing set. There is no warm-up
+      subset, thereby achieving the longest possible out-of-sample simulation.
+
+   Disadvantages
+   1. Like WF, a single backtest path is simulated (although not the historical one).
+      There is one and only one forecast generated per observation.
+   2. CV has no clear historical interpretation. The output does not simulate how the
+      strategy would have performed in the past, but how it may perform in the future
+      under various stress scenarios (a useful result in its own right).
+   3. Because the training set does not trail the testing set, leakage is possible.
+      Extreme care must be taken to avoid leaking testing information into the train-
+      ing set. See Chapter 7 for a discussion on how purging and embargoing can
+      help prevent informational leakage in the context of CV.
+
+
+12.4   THE COMBINATORIAL PURGED CROSS-VALIDATION METHOD
+
+In this section I will present a new method, which addresses the main drawback of the
+WF and CV methods, namely that those schemes test a single path. I call it the “com-
+binatorial purged cross-validation” (CPCV) method. Given a number 𝜑 of backtest
+paths targeted by the researcher, CPCV generates the precise number of combina-
+tions of training/testing sets needed to generate those paths, while purging training
+observations that contain leaked information.
+164                                                BACKTESTING THROUGH CROSS-VALIDATION
+
+      S1    S2    S3   S4    S5       S6   S7      S8     S9        S10    S11     S12   S13   S14   S15 Paths
+G1    x     x     x    x     x                                                                            5
+G2    x                               x    x        x     x                                               5
+G3           x                        x                             x      x       x                      5
+G4                x                        x                        x                    x     x          5
+G5                     x                            x                      x             x           x    5
+G6                            x                           x                        x           x     x    5
+
+
+                           FIGURE 12.1         Paths generated for 𝝋 [6, 2] = 5
+
+
+12.4.1     Combinatorial Splits
+Consider T observations partitioned into N groups without shuffling, where groups
+n = 1, … , N − 1 are of size ⌊T∕N⌋, the Nth group is of size T − ⌊T∕N⌋ (N − 1), and
+⌊.⌋ is the floor or integer function. For a testing set of size k groups, the number of
+possible training/testing splits is
+                                  (            )        ∏k−1
+                                       N                 i=0 (N − i)
+                                                   =
+                                      N−k                      k!
+
+   Since each combination involves k tested groups, the total number of tested groups
+    ( N )
+is k N−k   . And since we have computed all possible combinations, these tested
+groups are uniformly distributed across all N (each group belongs to the same num-
+ber of training and testing sets). The implication is that from k-sized testing sets on
+N groups we can backtest a total number of paths 𝜑 [N, k],
+                                           (             )        ∏k−1
+                                   k             N                      i=1 (N − i)
+                        𝜑 [N, k] =                            =
+                                   N            N−k                     (k − 1)!
+
+    Figure 12.1 illustrates the composition of train/test splits for N = 6 and k = 2.
+           ( )
+There are 64 = 15 splits, indexed as S1,… ,S15. For each split, the figure marks with
+a cross (x) the groups included in the testing set, and leaves unmarked the groups that
+form the training set. Each group forms part of 𝜑 [6, 2] = 5 testing sets, therefore this
+train/test split scheme allows us to compute 5 backtest paths.
+    Figure 12.2 shows the assignment of each tested group to one backtest path. For
+example, path 1 is the result of combining the forecasts from (G1, S1), (G2, S1),
+
+
+      S1    S2    S3   S4    S5       S6   S7      S8     S9        S10    S11     S12   S13   S14   S15 Paths
+G1    1     2     3    4     5                                                                            5
+G2    1                               2    3       4      5                                               5
+G3           1                        2                             3      4       5                      5
+G4                1                        2                        3                    4     5          5
+G5                     1                           2                       3             4           5    5
+G6                            1                           2                        3           4     5    5
+
+
+                 FIGURE 12.2      Assignment of testing groups to each of the 5 paths
+THE COMBINATORIAL PURGED CROSS-VALIDATION METHOD                                       165
+
+(G3, S2), (G4, S3), (G5, S4) and (G6, S5). Path 2 is the result of combining forecasts
+from (G1, S2), (G2, S6), (G3, S6), (G4, S7), (G5, S8) and (G6, S9), and so on.
+   These paths are generated by training the classifier on a portion 𝜃 = 1 − k∕N of the
+data for each combination. Although it is theoretically possible to train on a portion
+𝜃 < 1∕2, in practice we will assume that k ≤ N∕2. The portion of data in the training
+set 𝜃 increases with N → T but it decreases with k → N∕2. The number of paths
+𝜑 [N, k] increases with N → T and with k → N∕2. In the limit, the largest number of
+paths is achieved by setting N = T and k = N∕2 = T∕2, at the expense of training the
+classifier on only half of the data for each combination (𝜃 = 1∕2).
+
+
+12.4.2   The Combinatorial Purged Cross-Validation Backtesting Algorithm
+In Chapter 7 we introduced the concepts of purging and embargoing in the context
+of CV. We will now use these concepts for backtesting through CV. The CPCV back-
+testing algorithm proceeds as follows:
+
+   1. Partition T observations into N groups without shuffling, where groups
+      n = 1, … , N − 1 are of size ⌊T∕N⌋, and the Nth group is of size T −
+      ⌊T∕N⌋ (N − 1).
+   2. Compute all possible training/testing splits, where for each split N − k groups
+      constitute the training set and k groups constitute the testing set.
+   3. For any pair of labels (yi , yj ), where yi belongs to the training set and yj belongs
+      to the testing set, apply the PurgedKFold class to purge yi if yi spans over a
+      period used to determine label yj . This class will also apply an embargo, should
+      some testing samples predate some training samples.
+                            ( N )
+   4. Fit classifiers
+           ( N ) on the N−k training sets, and produce forecasts on the respec-
+      tive N−k testing sets.
+   5. Compute the 𝜑 [N, k] backtest paths. You can calculate one Sharpe ratio from
+      each path, and from that derive the empirical distribution of the strategy’s
+      Sharpe ratio (rather than a single Sharpe ratio, like WF or CV).
+
+
+12.4.3   A Few Examples
+For k = 1, we will obtain 𝜑 [N, 1] = 1 path, in which case CPCV reduces to CV. Thus,
+CPCV can be understood as a generalization of CV for k > 1.
+    For k = 2, we will obtain 𝜑 [N, 2] = N − 1 paths. This is a particularly interesting
+case, because while training the classifier on a large portion of the data, 𝜃 = 1 − 2∕N,
+we can generate almost as many backtest paths as the number of groups, N − 1. An
+easy rule of thumb is to partition the data into N = 𝜑 + 1 groups, where 𝜑 is the
+                                             ( N )
+number of paths we target, and then form N−2         combinations. In the limit, we can
+assign one group per observation, N = T, and generate 𝜑 [T, 2] = T − 1 paths, while
+training the classifier on a portion 𝜃 = 1 − 2∕T of the data per combination.
+166                                        BACKTESTING THROUGH CROSS-VALIDATION
+
+   If even more paths are needed, we can increase k → N∕2, but as explained earlier
+that will come at the cost of using a smaller portion of the dataset for training. In prac-
+tice, k = 2 is often enough to generate the needed 𝜑 paths, by setting N = 𝜑 + 1 ≤ T.
+
+
+12.5    HOW COMBINATORIAL PURGED CROSS-VALIDATION
+        ADDRESSES BACKTEST OVERFITTING
+
+Given a sample of IID random variables, xi ∼ Z, i = 1, … , I, where Z is the standard
+normal distribution, the expected maximum of that sample can be approximated as
+                                         [      ]        [       ] √
+                                              1              1
+       E[max{xi }i=1,…,I ] ≈ (1 − 𝛾) Z −1 1 −     + 𝛾Z −1 1 − e−1 ≤ 2log [I]
+                                              I              I
+
+where Z −1 [.] is the inverse of the CDF of Z, 𝛾 ≈ 0.5772156649 ⋯ is the Euler-
+Mascheroni constant, and I ≫ 1 (see Bailey et al. [2014] for a proof). Now suppose
+that a researcher backtests I strategies on an instrument that behaves like a martingale,
+                                                                  y
+with Sharpe ratios {yi }i=1,…,I , E[yi ] = 0, 𝜎 2 [yi ] > 0, and 𝜎[yi ] ∼ Z. Even though the
+                                                                     i
+true Sharpe ratio is zero, we expect to find one strategy with a Sharpe ratio of
+
+                     E[max{yi }i=1,…,I ] = E[max{xi }i=1,…,I ]𝜎[yi ]
+
+    WF backtests exhibit high variance, 𝜎[yi ] ≫ 0, for at least one reason: A large
+portion of the decisions are based on a small portion of the dataset. A few observations
+will have a large weight on the Sharpe ratio. Using a warm-up period will reduce the
+backtest length, which may contribute to making the variance even higher. WF’s high
+variance leads to false discoveries, because researchers will select the backtest with
+the maximum estimated Sharpe ratio, even if the true Sharpe ratio is zero. That is
+the reason it is imperative to control for the number of trials (I) in the context of WF
+backtesting. Without this information, it is not possible to determine the Family-Wise
+Error Rate (FWER), False Discovery Rate (FDR), Probability of Backtest Overfitting
+(PBO, see Chapter 11) or similar model assessment statistic.
+    CV backtests (Section 12.3) address that source of variance by training each clas-
+sifier on equal and large portions of the dataset. Although CV leads to fewer false
+discoveries than WF, both approaches still estimate the Sharpe ratio from a single
+path for a strategy i, yi , and that estimation may be highly volatile. In contrast, CPCV
+derives the distribution of Sharpe ratios from a large number of paths, j = 1, … , 𝜑,
+with mean E[{yi,j }j=1,…,𝜑 ] = 𝜇i and variance 𝜎 2 [{yi,j }j=1,…,𝜑 ] = 𝜎i2 . The variance of
+the sample mean of CPCV paths is
+                          (                        )         (                )
+           𝜎 2 [𝜇i ] = 𝜑−2 𝜑𝜎i2 + 𝜑 (𝜑 − 1) 𝜎i2 𝜌̄i = 𝜑−1 𝜎i2 1 + (𝜑 − 1) 𝜌̄i
+
+where 𝜎i2 is the variance of the Sharpe ratios across paths for strategy i, and 𝜌̄i is
+the average off-diagonal correlation among {yi,j }j=1,…,𝜑 . CPCV leads to fewer false
+EXERCISES                                                                            167
+
+discoveries than CV and WF, because 𝜌̄i < 1 implies that the variance of the sample
+mean is lower than the variance of the sample,
+                                             [ ]
+                                𝜑−1 𝜎i2 ≤ 𝜎 2 𝜇i < 𝜎i2
+
+    The more uncorrelated the paths are, 𝜌̄i ≪ 1, the lower CPCV’s variance will be,
+and in the limit CPCV will report the true Sharpe ratio E[yi ] with zero variance,
+lim𝜑→∞ 𝜎 2 [𝜇i ] = 0. There will not be selection bias, because the strategy selected
+out of i = 1, … , I will be the one with the highest true Sharpe ratio.
+             ] we know that zero variance is unachievable, since 𝜑 has an upper bound,
+    Of course,
+       [
+𝜑 ≤ 𝜑 T, T2 . Still, for a large enough number of paths 𝜑, CPCV could make the vari-
+ance of the backtest so small as to make the probability of a false discovery negligible.
+    In Chapter 11, we argued that backtest overfitting may be the most important open
+problem in all of mathematical finance. Let us see how CPCV helps address this prob-
+lem in practice. Suppose that a researcher submits a strategy to a journal, supported
+by an overfit WF backtest, selected from a large number of undisclosed trials. The
+journal could ask the researcher to repeat his experiments using a CPCV for a given N
+and k. Because the researcher did not know in advance the number and characteristics
+of the paths to be backtested, his overfitting efforts will be easily defeated. The paper
+will be rejected or withdrawn from consideration. Hopefully CPCV will be used to
+reduce the number of false discoveries published in journals and elsewhere.
+
+
+EXERCISES
+
+12.1 Suppose that you develop a momentum strategy on a futures contract, where
+     the forecast is based on an AR(1) process. You backtest this strategy using the
+     WF method, and the Sharpe ratio is 1.5. You then repeat the backtest on the
+     reversed series and achieve a Sharpe ratio of –1.5. What would be the mathe-
+     matical grounds for disregarding the second result, if any?
+12.2 You develop a mean-reverting strategy on a futures contract. Your WF backtest
+     achieves a Sharpe ratio of 1.5. You increase the length of the warm-up period,
+     and the Sharpe ratio drops to 0.7. You go ahead and present only the result with
+     the higher Sharpe ratio, arguing that a strategy with a shorter warm-up is more
+     realistic. Is this selection bias?
+12.3 Your strategy achieves a Sharpe ratio of 1.5 on a WF backtest, but a Sharpe
+     ratio of 0.7 on a CV backtest. You go ahead and present only the result with
+     the higher Sharpe ratio, arguing that the WF backtest is historically accurate,
+     while the CV backtest is a scenario simulation, or an inferential exercise. Is this
+     selection bias?
+12.4 Your strategy produces 100,000 forecasts over time. You would like to derive
+     the CPCV distribution of Sharpe ratios by generating 1,000 paths. What are the
+     possible combinations of parameters (N, k) that will allow you to achieve that?
+12.5 You discover a strategy that achieves a Sharpe ratio of 1.5 in a WF backtest. You
+     write a paper explaining the theory that would justify such result, and submit
+168                                            BACKTESTING THROUGH CROSS-VALIDATION
+
+      it to an academic journal. The editor replies that one referee has requested you
+      repeat your backtest using a CPCV method with N = 100 and k = 2, including
+      your code and full datasets. You follow these instructions, and the mean Sharpe
+      ratio is –1 with a standard deviation of 0.5. Furious, you do not reply, but instead
+      withdraw your submission, and resubmit in a different journal of higher impact
+      factor. After 6 months, your paper is accepted. You appease your conscience
+      thinking that, if the discovery is false, it is the journal’s fault for not having
+      requested a CPCV test. You think, “It cannot be unethical, since it is permitted,
+      and everybody does it.” What are the arguments, scientific or ethical, to justify
+      your actions?
+
+
+REFERENCES
+
+Bailey, D. and M. López de Prado (2012): “The Sharpe ratio efficient frontier.” Journal of Risk,
+     Vol. 15, No. 2 (Winter). Available at https://ssrn.com/abstract=1821643.
+Bailey, D. and M. López de Prado (2014): “The deflated Sharpe ratio: Correcting for selection
+     bias, backtest overfitting and non-normality.” Journal of Portfolio Management, Vol. 40, No. 5,
+     pp. 94–107. Available at https://ssrn.com/abstract=2460551.
+Bailey, D., J. Borwein, M. López de Prado, and J. Zhu (2014): “Pseudo-mathematics and finan-
+     cial charlatanism: The effects of backtest overfitting on out-of-sample performance.” Notices
+     of the American Mathematical Society, Vol. 61, No. 5, pp. 458–471. Available at http://ssrn
+     .com/abstract=2308659.
+Bailey, D., J. Borwein, M. López de Prado, and J. Zhu (2017): “The probability of backtest overfit-
+     ting.” Journal of Computational Finance, Vol. 20, No. 4, pp. 39–70. Available at https://ssrn
+     .com/abstract=2326253.

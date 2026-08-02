@@ -1,0 +1,75 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qlab"
+version = "0.1.0"
+description = "Quant Lab — A-share machine learning research framework, based on López de Prado (2018)."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "mellolo" }]
+dependencies = [
+    "numpy>=1.24",
+    "pandas>=2.0",
+    "scipy>=1.10",
+    "scikit-learn>=1.3",
+    "pyarrow>=14.0",          # Parquet I/O
+    "tables>=3.9",            # HDF5 I/O
+    "exchange-calendars>=4.5", # 交易日历（A 股 XSHG）
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4",
+    "pytest-cov>=4.1",
+    "ruff>=0.1",
+    "mypy>=1.7",
+    "import-linter>=2.0",
+]
+# 聚宽数据源(JQDataSource). jq 是本仓内的独立包:
+#   pip install -e ./jq
+# 未安装时 qlab 仍可正常使用 FakeDataSource。
+jq = ["jq"]
+
+[project.scripts]
+qlab = "qlab.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["qlab*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "SIM"]
+ignore = ["E501", "N803", "N806", "N801"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+python_files = ["test_*.py"]
+markers = [
+    "realdata: 需要真实聚宽数据源(网络+凭证)的回归测试。默认跳过, 用 -m realdata 开启。",
+]
+addopts = "-m 'not realdata'"
+
+[tool.importlinter]
+root_packages = ["qlab"]
+
+[[tool.importlinter.contracts]]
+name = "Layered dependency: core ← data ← features ← labeling ← weights ← models ← sizing/evaluation/allocation"
+type = "layers"
+layers = [
+    "qlab.sizing | qlab.evaluation | qlab.allocation",
+    "qlab.models",
+    "qlab.weights",
+    "qlab.labeling",
+    "qlab.features",
+    "qlab.data",
+    "qlab.core",
+]

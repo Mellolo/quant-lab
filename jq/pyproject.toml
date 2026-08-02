@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jq"
+version = "0.1.0"
+description = "JoinQuant (聚宽) Jupyter kernel 远程执行桥 —— 通过聚宽研究环境的 JupyterHub API 远程驱动 kernel 跑 jqdata。"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "mellolo" }]
+dependencies = [
+    "requests>=2.28",         # 聚宽 JupyterHub REST API
+    "websocket-client>=1.6",  # 聚宽 kernel WebSocket 通道
+    "pandas>=2.0",            # DataFrame 反序列化与本地缓存
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "ruff>=0.5",
+]
+
+[project.scripts]
+jqdata = "jq.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["jq*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "SIM"]
+ignore = ["E501", "N803", "N806", "N801"]

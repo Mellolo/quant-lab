@@ -1,0 +1,1420 @@
+CHAPTER 13
+
+
+
+
+       Backtesting on Synthetic Data
+
+
+
+
+13.1    MOTIVATION
+
+In this chapter we will study an alternative backtesting method, which uses his-
+tory to generate a synthetic dataset with statistical characteristics estimated from the
+observed data. This will allow us to backtest a strategy on a large number of unseen,
+synthetic testing sets, hence reducing the likelihood that the strategy has been fit to
+a particular set of datapoints.1 This is a very extensive subject, and in order to reach
+some depth we will focus on the backtesting of trading rules.
+
+
+13.2    TRADING RULES
+
+Investment strategies can be defined as algorithms that postulate the existence of a
+market inefficiency. Some strategies rely on econometric models to predict prices,
+using macroeconomic variables such as GDP or inflation; other strategies use fun-
+damental and accounting information to price securities, or search for arbitrage-like
+opportunities in the pricing of derivatives products, etc. For instance, suppose that
+financial intermediaries tend to sell off-the-run bonds two days before U.S. Treasury
+auctions, in order to raise the cash needed for buying the new “paper.” One could
+monetize on that knowledge by selling off-the-run bonds three days before auctions.
+But how? Each investment strategy requires an implementation tactic, often referred
+to as “trading rules.”
+   There are dozens of hedge fund styles, each running dozens of unique investment
+strategies. While strategies can be very heterogeneous in nature, tactics are relatively
+homogeneous. Trading rules provide the algorithm that must be followed to enter
+and exit a position. For example, a position will be entered when the strategy’s signal
+
+1 I would like to thank Professor Peter Carr (New York University) for his contributions to this chapter.
+
+
+                                                                                                      169
+170                                                  BACKTESTING ON SYNTHETIC DATA
+
+reaches a certain value. Conditions for exiting a position are often defined through
+thresholds for profit-taking and stop-losses. These entry and exit rules rely on param-
+eters that are usually calibrated via historical simulations. This practice leads to the
+problem of backtest overfitting, because these parameters target specific observations
+in-sample, to the point that the investment strategy is so attached to the past that it
+becomes unfit for the future.
+   An important clarification is that we are interested in the exit corridor conditions
+that maximize performance. In other words, the position already exists, and the ques-
+tion is how to exit it optimally. This is the dilemma often faced by execution traders,
+and it should not be mistaken with the determination of entry and exit thresholds
+for investing in a security. For a study of that alternative question, see, for example,
+Bertram [2009].
+   Bailey et al. [2014, 2017] discuss the problem of backtest overfitting, and provide
+methods to determine to what extent a simulated performance may be inflated due
+to overfitting. While assessing the probability of backtest overfitting is a useful tool
+to discard superfluous investment strategies, it would be better to avoid the risk of
+overfitting, at least in the context of calibrating a trading rule. In theory this could be
+accomplished by deriving the optimal parameters for the trading rule directly from
+the stochastic process that generates the data, rather than engaging in historical sim-
+ulations. This is the approach we take in this chapter. Using the entire historical sam-
+ple, we will characterize the stochastic process that generates the observed stream
+of returns, and derive the optimal values for the trading rule’s parameters without
+requiring a historical simulation.
+
+
+13.3   THE PROBLEM
+
+Suppose an investment strategy S invests in i = 1, … I opportunities or bets. At each
+opportunity i, S takes a position of mi units of security X, where mi ∈ (−∞, ∞). The
+transaction that entered such opportunity was priced at a value mi Pi,0 , where Pi,0
+is the average price per unit at which the mi securities were transacted. As other
+market participants transact security X, we can mark-to-market (MtM) the value of
+that opportunity i after t observed transactions as mi Pi,t . This represents the value of
+opportunity i if it were liquidated at the price observed in the market after t trans-
+actions. Accordingly, we can compute the MtM profit/loss of opportunity i after t
+transactions as 𝜋i,t = mi (Pi,t − Pi,0 ).
+    A standard trading rule provides the logic for exiting opportunity i at t = Ti . This
+occurs as soon as one of two conditions is verified:
+
+   r 𝜋i,T ≥ ̄𝜋, where 𝜋̄ > 0 is the profit-taking threshold.
+   r 𝜋i,Ti ≤ 𝜋, where 𝜋 < 0 is the stop-loss threshold.
+         i
+
+
+   These thresholds are equivalent to the horizontal barriers we discussed in the con-
+text of meta-labelling (Chapter 3). Because 𝜋 < ̄𝜋, one and only one of the two exit
+conditions can trigger the exit from opportunity i. Assuming that opportunity i can
+THE PROBLEM                                                                                 171
+
+be exited at Ti , its final profit/loss is 𝜋i,Ti . At the onset of each opportunity, the goal
+is to realize an expected profit E0 [𝜋i,Ti ] = mi (E0 [Pi,Ti ] − Pi,0 ), where E0 [Pi,Ti ] is the
+forecasted price and Pi,0 is the entry level of opportunity i.
+
+
+ Definition 1: Trading Rule: A trading rule for strategy S is defined by the set of
+ parameters R := {𝜋, ̄
+                     𝜋}.
+
+
+   One way to calibrate (by brute force) the trading rule is to:
+
+   1. Define a set of alternative values of R, Ω := {R}.
+   2. Simulate historically (backtest) the performance of S under alternative values
+      of R ∈ Ω.
+   3. Select the optimal R∗ .
+
+   More formally:
+
+                                     R∗ = arg max{SRR }
+                                                R∈Ω
+                                            E[𝜋i,Ti |R]
+                                   SRR =                                                  (13.1)
+                                            𝜎[𝜋i,Ti |R]
+where E [.] and 𝜎 [.] are respectively the expected value and standard deviation of
+𝜋i,Ti , conditional on trading rule R, over i = 1, … I. In other words, equation (13.1)
+maximizes the Sharpe ratio of S on I opportunities over the space of alternative trading
+rules R (see Bailey and López de Prado [2012] for a definition and analysis of the
+Sharpe ratio). Because we count with two variables to maximize SRR over a sample
+of size I, it is easy to overfit R. A trivial overfit occurs when a pair (𝜋, ̄
+                                                                            𝜋) targets a
+few outliers. Bailey et al. [2017] provide a rigorous definition of backtest overfitting,
+which can be applied to our study of trading rules as follows.
+
+                                                                             [ [           ]]
+                                                                                       |
+                                                                               E 𝜋j,Tj |R∗
+                                                                                       |   ] <
+ Definition 2: Overfit Trading Rule:                R∗    is overfit if E       [
+                                                                                       |
+                                                                               𝜎 𝜋j,Tj |R∗
+      [ [ [ | ] ]]                                                                     |
+              E 𝜋j,Tj |R
+               [      | ]
+ MeΩ E                |     , where j = I + 1, … J and MeΩ [.] is the median.
+              𝜎 𝜋j,Tj |R
+                      |
+
+
+
+    Intuitively, an optimal in-sample (IS, i ∈ [1, I]) trading rule R∗ is overfit when it
+is expected to underperform the median of alternative trading rules R ∈ Ω out-of-
+sample (OOS, j ∈ [I + 1, J]). This is essentially the same definition we used in chap-
+ter 11 to derive PBO. Bailey et al. [2014] argue that it is hard not to overfit a backtest,
+particularly when there are free variables able to target specific observations IS, or
+the number of elements in Ω is large. A trading rule introduces such free variables,
+172                                                               BACKTESTING ON SYNTHETIC DATA
+
+because R∗ can be determined independently from S. The outcome is that the backtest
+profits from random noise IS, making R∗ unfit for OOS opportunities. Those same
+authors show that overfitting leads to negative performance OOS when Δ𝜋i,t exhibits
+serial dependence. While PBO provides a useful method to evaluate to what extent
+a backtest has been overfit, it would be convenient to avoid this problem in the first
+place.2 To that aim we dedicate the following section.
+
+
+13.4    OUR FRAMEWORK
+
+Until now we have not characterized the stochastic process from which observations
+𝜋i,t are drawn. We are interested in finding an optimal trading rule (OTR) for those
+scenarios where overfitting would be most damaging, such as when 𝜋i,t exhibits serial
+correlation. In particular, suppose a discrete Ornstein-Uhlenbeck (O-U) process on
+prices
+
+                            Pi,t = (1 − 𝜑) E0 [Pi,Ti ] + 𝜑Pi,t−1 + 𝜎𝜀i,t                               (13.2)
+
+such that the random shocks are IID distributed 𝜀i,t ∼ N (0, 1). The seed value for
+this process is Pi,0 , the level targeted by opportunity i is E0 [Pi,Ti ], and 𝜑 determines
+the speed at which Pi,0 converges towards E0 [Pi,Ti ]. Because 𝜋i,t = mi (Pi,t − Pi,0 ),
+equation (13.2) implies that the performance of opportunity i is characterized by the
+process
+
+                       1
+                         𝜋 = (1 − 𝜑)E0 [Pi,Ti ] − Pi,0 + 𝜑Pi,t−1 + 𝜎𝜀i,t                               (13.3)
+                       mi i,t
+
+   From the proof to Proposition 4 in Bailey and López de Prado [2013], it can be
+shown that the distribution of the process specified in equation (13.2) is Gaussian
+with parameters
+                        [       (                                       )                          ]
+                                                       ∑
+                                                       t−1                              ∑
+                                                                                        t−1
+             𝜋i,t ∼ N mi         (1 − 𝜑) E0 [Pi,Ti ]         𝜑 − Pi,0
+                                                              j
+                                                                            , m2i 𝜎 2         𝜑
+                                                                                              2j
+                                                                                                       (13.4)
+                                                       j=0                              j=0
+
+
+and a necessary and sufficient condition for its stationarity is that 𝜑 ∈ (−1, 1). Given a
+set of input parameters {𝜎, 𝜑} and initial conditions {Pi,0 , E0 [Pi,Ti ]} associated with
+opportunity i, is there an OTR R∗ := (𝜋, ̄ 𝜋)? Similarly, should strategy S predict a
+profit target ̄
+             𝜋, can we compute the optimal stop-loss 𝜋 given the input values {𝜎, 𝜑}?
+If the answer to these questions is affirmative, no backtest would be needed in order
+to determine R∗ , thus avoiding the problem of overfitting the trading rule. In the next
+section we will show how to answer these questions experimentally.
+
+2 The strategy may still be the result of backtest overfitting, but at least the trading rule would not have
+
+ contributed to that problem.
+NUMERICAL DETERMINATION OF OPTIMAL TRADING RULES                                       173
+
+13.5     NUMERICAL DETERMINATION OF OPTIMAL TRADING RULES
+
+In the previous section we used an O-U specification to characterize the stochastic
+process generating the returns of strategy S. In this section we will present a pro-
+cedure to numerically derive the OTR for any specification in general, and the O-U
+specification in particular.
+
+
+13.5.1     The Algorithm
+The algorithm consists of five sequential steps.
+
+      Step 1: We estimate the input parameters {𝜎, 𝜑}, by linearizing equation (13.2)
+         as:
+
+                           Pi,t = E0 [Pi,Ti ] + 𝜑(Pi,t−1 − E0 [Pi,Ti ]) + 𝜉t        (13.5)
+
+      We can then form vectors X and Y by sequencing opportunities:
+
+                ⎡ P0,0 − E0 [P0,T0 ] ⎤       ⎡ P0,1 ⎤       ⎡ E0 [P0,T0 ] ⎤
+                ⎢ P − E [P ] ⎥               ⎢ P0,2 ⎥       ⎢ E [P ] ⎥
+                ⎢ 0,1      0 0,T0 ⎥
+                                             ⎢       ⎥      ⎢ 0 0,T0 ⎥
+                ⎢         ⋯            ⎥        ⋯           ⎢     ⋯        ⎥
+                ⎢ P0,T−1 − E0 [P0,T0 ] ⎥     ⎢       ⎥      ⎢              ⎥
+                                               P     ⎥; Z = ⎢ E  [P      ]
+              X=⎢                      ⎥ ; Y=⎢  0,T            0   0,T 0
+                                                                           ⎥        (13.6)
+                ⎢         ⋯            ⎥     ⎢ ⋯ ⎥          ⎢     ⋯        ⎥
+                ⎢ PI,0 − E0 [PI,TI ] ⎥       ⎢ PI,1  ⎥      ⎢ E0 [PI,TI ] ⎥
+                ⎢                      ⎥     ⎢       ⎥      ⎢              ⎥
+                ⎢P
+                          ⋯
+                                       ⎥     ⎢ ⋯ ⎥                ⋯
+                                                            ⎢ E [P ] ⎥
+                ⎣ I,T−1  − E0 I,TI ⎦
+                              [P    ]        ⎣ P I,T ⎦      ⎣ 0 I,TI ⎦
+
+      Applying OLS on equation (13.5), we can estimate the original O-U parameters
+as,
+
+                                           cov [Y, X]
+                                      𝜑̂ =
+                                           cov [X, X]
+                                     𝜉̂t = Y − Z − ̂𝜑X                              (13.7)
+                                           √
+                                      𝜎̂ = cov[𝜉̂t , 𝜉̂t ]
+
+where cov [⋅, ⋅] is the covariance operator.
+
+      Step 2: We construct a mesh of stop-loss and profit-taking pairs, (𝜋, ̄ 𝜋).
+         For example, a Cartesian product of 𝜋 = {− 12 𝜎, −𝜎, … , −10𝜎} and 𝜋̄ =
+        { 12 𝜎, 𝜎, … , 10𝜎} give us 20 × 20 nodes, each constituting an alternative trading
+        rule R ∈ Ω.
+174                                                          BACKTESTING ON SYNTHETIC DATA
+
+   Step 3: We generate a large number of paths (e.g., 100,000) for 𝜋i,t applying
+      our estimates { ̂𝜎, ̂𝜑}. As seed values, we use the observed initial conditions
+      {Pi,0 , E0 [Pi,Ti ]} associated with an opportunity i. Because a position cannot
+      be held for an unlimited period of time, we can impose a maximum holding
+      period (e.g., 100 observations) at which point the position is exited even though
+      𝜋 ≤ 𝜋i,100 ≤ ̄   𝜋. This maximum holding period is equivalent to the vertical bar
+      of the triple-barrier method (Chapter 3).3
+   Step 4: We apply the 100,000 paths generated in Step 3 on each node of the 20 ×
+      20 mesh (𝜋, ̄   𝜋) generated in Step 2. For each node, we apply the stop-loss and
+      profit-taking logic, giving us 100,000 values of 𝜋i,Ti . Likewise, for each node
+      we compute the Sharpe ratio associated with that trading rule as described in
+      equation (13.1). See Bailey and López de Prado [2012] for a study of the con-
+      fidence interval of the Sharpe ratio estimator. This result can be used in three
+      different ways: Step 5a, Step 5b and Step 5c).
+   Step 5a: We determine the pair (𝜋, ̄     𝜋) within the mesh of trading rules that is
+      optimal, given the input parameters { ̂𝜎, ̂𝜑} and the observed initial conditions
+      {Pi,0 , E0 [Pi,Ti ]}.
+   Step 5b: If strategy S provides a profit target 𝜋i for a particular opportunity i, we
+      can use that information in conjunction with the results in Step 4 to determine
+      the optimal stop-loss, 𝜋i .
+   Step 5c: If the trader has a maximum stop-loss 𝜋i imposed by the fund’s man-
+      agement for opportunity i, we can use that information in conjunction with the
+      results in Step 4 to determine the optimal profit-taking 𝜋i within the range of
+      stop-losses [0, 𝜋i ].
+
+
+   Bailey and López de Prado [2013] prove that the half-life of the process in equation
+                log[2]
+(13.2) is 𝜏 = − log[𝜑] , with the requirement that 𝜑 ∈ (0, 1). From that result, we can
+                                                                                       −1∕
+determine the value of 𝜑 associated with a certain half-life 𝜏 as 𝜑 = 2                   𝜏.
+
+
+
+
+13.5.2     Implementation
+Snippet 13.1 provides an implementation in Python of the experiments conducted in
+this chapter. Function main produces a Cartesian product of parameters (E0 [Pi,Ti ], 𝜏),
+which characterize the stochastic process from equation (13.5). Without loss of gen-
+erality, in all simulations we have used 𝜎 = 1. Then, for each pair (E0 [Pi,Ti ], 𝜏),
+function batch computes the Sharpe ratios associated with various trading
+rules.
+
+3 The trading rule R could be characterized as a function of the three barriers, instead of the horizontal
+
+ ones. That change would have no impact on the procedure. It would merely add one more dimension
+ to the mesh (20 × 20 × 20). In this chapter we do not consider that setting, because it would make the
+ visualization of the method less intuitive.
+    NUMERICAL DETERMINATION OF OPTIMAL TRADING RULES                                        175
+
+
+    SNIPPET 13.1 PYTHON CODE FOR THE DETERMINATION OF
+    OPTIMAL TRADING RULES
+    import numpy as np
+    from random import gauss
+    from itertools import product
+    #———————————————————————————————————————
+    def main():
+        rPT=rSLm=np.linspace(0,10,21)
+        count=0
+        for prod_ in product([10,5,0,-5,-10],[5,10,25,50,100]):
+            count+=1
+            coeffs={'forecast':prod_[0],'hl':prod_[1],'sigma':1}
+            output=batch(coeffs,nIter=1e5,maxHP=100,rPT=rPT,rSLm=rSLm)
+        return output
+
+
+
+
+        Snippet 13.2 computes a 20 × 20 mesh of Sharpe ratios, one for each trading
+    rule (𝜋, ̄
+             𝜋), given a pair of parameters (E0 [Pi,Ti ], 𝜏). There is a vertical barrier, as the
+    maximum holding period is set at 100 (maxHP = 100). We have fixed Pi,0 = 0, since it
+    is the distance (Pi,t−1 − E0 [Pi,Ti ]) in equation (13.5) that drives the convergence, not
+    particular absolute price levels. Once the first out of three barriers is touched, the exit
+    price is stored, and the next iteration starts. After all iterations are completed (1E5),
+    the Sharpe ratio can be computed for that pair (𝜋, ̄   𝜋), and the algorithm moves to the
+    next pair. When all pairs of trading rules have been processed, results are reported
+    back to main. This algorithm can be parallelized, similar to what we did for the triple-
+    barrier method in Chapter 3. We leave that task as an exercise.
+
+
+
+    SNIPPET 13.2 PYTHON CODE FOR THE DETERMINATION OF
+    OPTIMAL TRADING RULES
+def batch(coeffs,nIter=1e5,maxHP=100,rPT=np.linspace(.5,10,20),
+    rSLm=np.linspace(.5,10,20),seed=0):
+    phi,output1=2**(-1./coeffs['hl']),[]
+    for comb_ in product(rPT,rSLm):
+        output2=[]
+        for iter_ in range(int(nIter)):
+            p,hp,count=seed,0,0
+            while True:
+                p=(1-phi)*coeffs['forecast']+phi*p+coeffs['sigma']*gauss(0,1)
+                cP=p-seed;hp+=1
+                if cP>comb_[0] or cP<-comb_[1] or hp>maxHP:
+                    output2.append(cP)
+                    break
+176                                                 BACKTESTING ON SYNTHETIC DATA
+
+    mean,std=np.mean(output2),np.std(output2)
+    print comb_[0],comb_[1],mean,std,mean/std
+    output1.append((comb_[0],comb_[1],mean,std,mean/std))
+return output1
+
+
+
+
+13.6     EXPERIMENTAL RESULTS
+
+Table 13.1 lists the combinations analyzed in this study. Although different values
+for these input parameters would render different numerical results, the combina-
+tions applied allow us to analyze the most general cases. Column “Forecast” refers
+to E0 [Pi,Ti ]; column “Half-Life” refers to 𝜏; column “Sigma” refers to 𝜎; column
+“maxHP” stands for maximum holding period.
+   In the following figures, we have plotted the non-annualized Sharpe ratios that
+result from various combinations of profit-taking and stop-loss exit conditions. We
+have omitted the negative sign in the y-axis (stop-losses) for simplicity. Sharpe ratios
+
+TABLE 13.1    Input Parameter Combinations Used in the Simulations
+
+Figure             Forecast             Half-Life            Sigma              maxHP
+
+16.1                   0                    5                   1                 100
+16.2                   0                   10                   1                 100
+16.3                   0                   25                   1                 100
+16.4                   0                   50                   1                 100
+16.5                   0                  100                   1                 100
+16.6                   5                    5                   1                 100
+16.7                   5                   10                   1                 100
+16.8                   5                   25                   1                 100
+16.9                   5                   50                   1                 100
+16.10                  5                  100                   1                 100
+16.11                 10                    5                   1                 100
+16.12                 10                   10                   1                 100
+16.13                 10                   25                   1                 100
+16.14                 10                   50                   1                 100
+16.15                 10                  100                   1                 100
+16.16                −5                     5                   1                 100
+16.17                −5                    10                   1                 100
+16.18                −5                    25                   1                 100
+16.19                −5                    50                   1                 100
+16.20                −5                   100                   1                 100
+16.21               − 10                    5                   1                 100
+16.22               − 10                   10                   1                 100
+16.23               − 10                   25                   1                 100
+16.24               − 10                   50                   1                 100
+16.25               − 10                  100                   1                 100
+EXPERIMENTAL RESULTS                                                                                                                               177
+
+are represented in grayscale (lighter indicating better performance; darker indicat-
+ing worse performance), in a format known as a heat-map. Performance (𝜋i,Ti ) is
+computed per unit held (mi = 1), since other values of mi would simply re-scale per-
+formance, with no impact on the Sharpe ratio. Transaction costs can be easily added,
+but for educational purposes it is better to plot results without them, so that you can
+appreciate the symmetry of the functions.
+
+
+13.6.1              Cases with Zero Long-Run Equilibrium
+Cases with zero long-run equilibrium are consistent with the business of market-
+makers, who provide liquidity under the assumption that price deviations from current
+levels will correct themselves over time. The smaller 𝜏, the smaller is the autoregres-
+                                              −1
+sive coefficient (𝜑 = 2 ∕𝜏 ). A small autoregressive coefficient in conjunction with
+a zero expected profit has the effect that most of the pairs (𝜋i , 𝜋i ) deliver a zero
+performance.
+   Figure 13.1 shows the heat-map for the parameter combination {E0 [Pi,Ti ], 𝜏, 𝜎} =
+{0, 5, 1}. The half-life is so small that performance is maximized in a narrow range of
+combinations of small profit-taking with large stop-losses. In other words, the optimal
+trading rule is to hold an inventory long enough until a small profit arises, even at the
+expense of experiencing some 5-fold or 7-fold unrealized losses. Sharpe ratios are
+
+
+                                                   Forecast=0  H-L=5  Sigma=1
+             10.0
+              9.5
+              9.0                                                                                                                                  3
+              8.5
+              8.0
+                                                                                                                                                   2
+              7.5
+              7.0
+              6.5                                                                                                                                  1
+              6.0
+
+
+ Stop-Loss
+              5.5
+              5.0                                                                                                                                  0
+              4.5
+              4.0
+              3.5                                                                                                                                  –1
+              3.0
+              2.5
+                                                                                                                                                   –2
+              2.0
+              1.5
+              1.0                                                                                                                                  –3
+              0.5
+              0.0
+                                                                                                        7.0   7.5
+                    0.0   0.5   1.0   1.5   2.0   2.5   3.0   3.5   4.0   4.5   5.0   5.5   6.0   6.5               8.0   8.5   9.0   9.5   10.0
+                                                                      Profit-Taking
+
+                                      FIGURE 13.1               Heat-map for {E0 [Pi,Ti ], 𝜏, 𝜎} = {0, 5, 1}
+178                                                                                               BACKTESTING ON SYNTHETIC DATA
+
+
+                                                  Forecast=0  H-L=10  Sigma=1
+             10.0
+                                                                                                                                                   2.0
+              9.5
+              9.0
+              8.5                                                                                                                                  1.5
+              8.0
+              7.5                                                                                                                                  1.0
+              7.0
+              6.5
+              6.0                                                                                                                                  0.5
+
+
+ Stop-Loss
+              5.5
+              5.0                                                                                                                                  0.0
+              4.5
+              4.0
+              3.5                                                                                                                                  –0.5
+              3.0
+              2.5                                                                                                                                  –1.0
+              2.0
+              1.5
+                                                                                                                                                   –1.5
+              1.0
+              0.5
+              0.0                                                                                                                                  –2.0
+                    0.0   0.5   1.0   1.5   2.0   2.5   3.0   3.5   4.0   4.5   5.0   5.5   6.0   6.5   7.0   7.5   8.0   8.5   9.0   9.5   10.0
+                                                                      Profit-Taking
+
+                                      FIGURE 13.2               Heat-map for {E0 [Pi,Ti ], 𝜏, 𝜎} = {0, 10, 1}
+
+
+high, reaching levels of around 3.2. This is in fact what many market-makers do in
+practice, and is consistent with the “asymmetric payoff dilemma” described in Easley
+et al. [2011]. The worst possible trading rule in this setting would be to combine a
+short stop-loss with a large profit-taking threshold, a situation that market-makers
+avoid in practice. Performance is closest to neutral in the diagonal of the mesh, where
+profit-taking and stop-losses are symmetric. You should keep this result in mind when
+labeling observations using the triple-barrier method (Chapter 3).
+   Figure 13.2 shows that, if we increase 𝜏 from 5 to 10, the areas of highest and
+lowest performance spread over the mesh of pairs (𝜋, ̄      𝜋), while the Sharpe ratios
+decrease. This is because, as the half-life increases, so does the magnitude of the
+                                                                                       −1
+autoregressive coefficient (recall that 𝜑 = 2 ∕𝜏 ), thus bringing the process closer to
+a random walk.
+   In Figure 13.3, 𝜏 = 25, which again spreads the areas of highest and lowest per-
+formance while reducing the Sharpe ratio. Figure 13.4 (𝜏 = 50) and Figure 13.5
+(𝜏 = 100) continue that progression. Eventually, as 𝜑 → 1, there are no recognizable
+areas where performance can be maximized.
+   Calibrating a trading rule on a random walk through historical simulations would
+lead to backtest overfitting, because one random combination of profit-taking and
+stop-loss that happened to maximize Sharpe ratio would be selected. This is why
+backtesting of synthetic data is so important: to avoid choosing a strategy because
+some statistical fluke took place in the past (a single random path). Our procedure
+EXPERIMENTAL RESULTS                                                                                                                                   179
+
+                                                    Forecast=0 ⏐ H-L=25 ⏐ Sigma=1
+              10.0
+               9.5
+               9.0                                                                                                                                   0.4
+               8.5
+               8.0
+               7.5
+               7.0                                                                                                                                   0.2
+               6.5
+               6.0
+
+
+  Stop-Loss
+               5.5
+               5.0                                                                                                                                   0.0
+               4.5
+               4.0
+               3.5
+               3.0                                                                                                                                   –0.2
+               2.5
+               2.0
+               1.5
+               1.0                                                                                                                                   –0.4
+               0.5
+               0.0
+                     0.0   0.5   1.0   1.5   2.0   2.5   3.0   3.5    4.0   4.5   5.0   5.5   6.0   6.5   7.0   7.5   8.0   8.5   9.0   9.5   10.0
+                                                                        Profit-Taking
+
+                                        FIGURE 13.3                  Heat-map for {E0 [Pi,Ti ], 𝜏, 𝜎} = {0, 25, 1}
+
+
+                                                   Forecast=0  H-L=50  Sigma=1
+              10.0
+               9.5                                                                                                                                   0.20
+               9.0
+               8.5                                                                                                                                   0.15
+               8.0
+               7.5                                                                                                                                   0.10
+               7.0
+               6.5
+                                                                                                                                                     0.05
+               6.0
+
+
+Stop-Loss
+               5.5
+               5.0                                                                                                                                   0.00
+               4.5
+               4.0                                                                                                                                   –0.05
+               3.5
+               3.0                                                                                                                                   –0.10
+               2.5
+               2.0
+               1.5                                                                                                                                   –0.15
+               1.0
+               0.5                                                                                                                                   –0.20
+               0.0
+                     0.0   0.5   1.0   1.5   2.0   2.5   3.0   3.5   4.0   4.5   5.0   5.5   6.0   6.5   7.0   7.5   8.0   8.5   9.0   9.5   10.0
+                                                                       Profit-Taking
+
+                                        FIGURE 13.4                  Heat-map for {E0 [Pi,Ti ], 𝜏, 𝜎} = {0, 50, 1}
+180                                                                                                BACKTESTING ON SYNTHETIC DATA
+
+
+                                                 Forecast=0  H-L=100  Sigma=1
+            10.0                                                                                                                                   0.100
+             9.5
+             9.0
+             8.5                                                                                                                                   0.075
+             8.0
+             7.5                                                                                                                                   0.050
+             7.0
+             6.5
+                                                                                                                                                   0.025
+             6.0
+
+
+Stop-Loss
+             5.5
+             5.0                                                                                                                                   0.000
+             4.5
+             4.0
+                                                                                                                                                   –0.025
+             3.5
+             3.0
+             2.5                                                                                                                                   –0.050
+             2.0
+             1.5                                                                                                                                   –0.075
+             1.0
+             0.5
+             0.0                                                                                                                                   –0.100
+                   0.0   0.5   1.0   1.5   2.0   2.5   3.0   3.5   4.0    4.5   5.0   5.5   6.0   6.5   7.0   7.5   8.0   8.5   9.0   9.5   10.0
+
+                                                                         Profit-Taking
+
+                                     FIGURE 13.5                   Heat-map for {E0 [Pi,Ti ], 𝜏, 𝜎} = {0, 100, 1}
+
+
+prevents overfitting by recognizing that performance exhibits no consistent pattern,
+indicating that there is no optimal trading rule.
+
+
+13.6.2              Cases with Positive Long-Run Equilibrium
+Cases with positive long-run equilibrium are consistent with the business of a
+position-taker, such as a hedge-fund or asset manager. Figure 13.6 shows the results
+for the parameter combination {E0 [Pi,Ti ], 𝜏, 𝜎} = {5, 5, 1}. Because positions tend to
+make money, the optimal profit-taking is higher than in the previous cases, centered
+around 6, with stop-losses that range between 4 and 10. The region of the optimal
+trading rule takes a characteristic rectangular shape, as a result of combining a wide
+stop-loss range with a narrower profit-taking range. Performance is highest across all
+experiments, with Sharpe ratios of around 12.
+   In Figure 13.7, we have increased the half-life from 𝜏 = 5 to 𝜏 = 10. Now the opti-
+mal performance is achieved at a profit-taking centered around 5, with stop-losses that
+range between 7 and 10. The range of optimal profit-taking is wider, while the range of
+optimal stop-losses narrows, shaping the former rectangular area closer to a square.
+Again, a larger half-life brings the process closer to a random walk, and therefore
+performance is now relatively lower than before, with Sharpe ratios of around 9.
+   In Figure 13.8, we have made 𝜏 = 25. The optimal profit-taking is now centered
+around 3, while the optimal stop-losses range between 9 and 10. The previous squared
+EXPERIMENTAL RESULTS                                                                                                                                181
+
+                                                    Forecast=5  H-L=5  Sigma=1
+              10.0
+               9.5                                                                                                                                  12
+               9.0
+               8.5
+               8.0
+               7.5                                                                                                                                  10
+               7.0
+               6.5
+               6.0                                                                                                                                  8
+
+
+ Stop-Loss
+               5.5
+               5.0
+               4.5                                                                                                                                  6
+               4.0
+               3.5
+               3.0
+               2.5                                                                                                                                  4
+               2.0
+               1.5
+               1.0                                                                                                                                  2
+               0.5
+               0.0
+                     0.0   0.5   1.0   1.5   2.0   2.5   3.0   3.5   4.0   4.5   5.0   5.5   6.0   6.5   7.0   7.5   8.0   8.5   9.0   9.5   10.0
+                                                                       Profit-Taking
+
+                                       FIGURE 13.6               Heat-map for {E0 [Pi,Ti ], 𝜏, 𝜎} = {5, 5, 1}
+
+
+                                                    Forecast=5  H-L=10  Sigma=1
+              10.0
+               9.5
+               9.0
+               8.5
+                                                                                                                                                    8
+               8.0
+               7.5
+               7.0
+               6.5
+               6.0                                                                                                                                  6
+
+
+  Stop-Loss
+               5.5
+               5.0
+               4.5
+               4.0                                                                                                                                  4
+               3.5
+               3.0
+               2.5
+               2.0
+               1.5                                                                                                                                  2
+               1.0
+               0.5
+               0.0
+                     0.0   0.5   1.0   1.5   2.0   2.5   3.0   3.5   4.0   4.5   5.0   5.5   6.0   6.5   7.0   7.5   8.0   8.5   9.0   9.5   10.0
+                                                                       Profit-Taking
+
+                                       FIGURE 13.7              Heat-map for {E0 [Pi,Ti ], 𝜏, 𝜎} = {5, 10, 1}
+182                                                                                               BACKTESTING ON SYNTHETIC DATA
+
+
+                                                  Forecast=5  H-L=25  Sigma=1
+             10.0
+              9.5                                                                                                                                  2.5
+              9.0
+              8.5
+              8.0
+              7.5                                                                                                                                  2.0
+              7.0
+              6.5
+              6.0
+
+
+ Stop-Loss
+              5.5                                                                                                                                  1.5
+              5.0
+              4.5
+              4.0
+              3.5                                                                                                                                  –1.0
+              3.0
+              2.5
+              2.0
+              1.5                                                                                                                                  –0.5
+              1.0
+              0.5
+              0.0
+                    0.0   0.5   1.0   1.5   2.0   2.5   3.0   3.5   4.0   4.5   5.0   5.5   6.0   6.5   7.0   7.5   8.0   8.5   9.0   9.5   10.0
+                                                                      Profit-Taking
+
+                                      FIGURE 13.8               Heat-map for {E0 [Pi,Ti ], 𝜏, 𝜎} = {5, 25, 1}
+
+
+area of optimal performance has given way to a semi-circle of small profit-taking with
+large stop-loss thresholds. Again we see a deterioration of performance, with Sharpe
+ratios of 2.7.
+    In Figure 13.9, the half-life is raised to 𝜏 = 50. As a result, the region of optimal
+performance spreads, while Sharpe ratios continue to fall to 0.8. This is the same
+effect we observed in the case of zero long-run equilibrium (Section 13.6.1), with
+the difference that because now E0 [Pi,Ti ] > 0, there is no symmetric area of worst
+performance.
+    In Figure 13.10, we appreciate that 𝜏 = 100 leads to the natural conclusion of
+the trend described above. The process is now so close to a random walk that the
+maximum Sharpe ratio is a mere 0.32.
+    We can observe a similar pattern in Figures 13.11 through 13.15, where E0 [Pi,Ti ] =
+10 and 𝜏 is progressively increased from 5 to 10, 25, 50, and 100, respectively.
+
+
+13.6.3              Cases with Negative Long-Run Equilibrium
+A rational market participant would not initiate a position under the assumption that
+a loss is the expected outcome. However, if a trader recognizes that losses are the
+expected outcome of a pre-existing position, she still needs a strategy to stop-out that
+position while minimizing such losses.
+   We have obtained Figure 13.16 as a result of applying parameters
+{E0 [Pi,Ti ], 𝜏, 𝜎} = {−5, 5, 1}. If we compare Figure 13.16 with Figure 13.6, it
+EXPERIMENTAL RESULTS                                                                                                                                 183
+
+                                                   Forecast=5  H-L=50  Sigma=1
+             10.0                                                                                                                                   0.8
+              9.5
+              9.0
+              8.5                                                                                                                                   0.7
+              8.0
+              7.5
+              7.0                                                                                                                                   0.6
+              6.5
+              6.0
+                                                                                                                                                    0.5
+
+ Stop-Loss
+              5.5
+              5.0
+              4.5                                                                                                                                   0.4
+              4.0
+              3.5
+              3.0                                                                                                                                   0.3
+              2.5
+              2.0
+              1.5                                                                                                                                   0.2
+              1.0
+              0.5                                                                                                                                   0.1
+              0.0
+                    0.0   0.5   1.0   1.5   2.0   2.5   3.0   3.5    4.0   4.5   5.0   5.5   6.0   6.5   7.0   7.5   8.0   8.5   9.0   9.5   10.0
+                                                                       Profit-Taking
+
+                                      FIGURE 13.9               Heat-map for {E0 [Pi,Ti ], 𝜏, 𝜎} = {5, 50, 1}
+
+
+                                                  Forecast=5  H-L=100  Sigma=1
+             10.0                                                                                                                                   0.35
+              9.5
+              9.0
+              8.5                                                                                                                                   0.30
+              8.0
+              7.5
+              7.0                                                                                                                                   0.25
+              6.5
+              6.0
+
+
+Stop-Loss
+              5.5
+                                                                                                                                                    0.20
+              5.0
+              4.5
+              4.0
+                                                                                                                                                    0.15
+              3.5
+              3.0
+              2.5
+              2.0                                                                                                                                   0.10
+              1.5
+              1.0
+              0.5                                                                                                                                   0.05
+              0.0
+                    0.0   0.5   1.0   1.5   2.0   2.5   3.0   3.5   4.0    4.5   5.0   5.5   6.0   6.5   7.0   7.5   8.0   8.5   9.0   9.5   10.0
+                                                                      Profit-Taking
+
+                                      FIGURE 13.10                  Heat-map for {E0 [Pi,Ti ], 𝜏, 𝜎} = {5,100,1}
+184                                                                                                 BACKTESTING ON SYNTHETIC DATA
+
+
+                                                    Forecast=10  H-L=5  Sigma=1
+            10.0
+             9.5                                                                                                                                     20.0
+             9.0
+             8.5                                                                                                                                     17.5
+             8.0
+             7.5
+             7.0                                                                                                                                     15.0
+             6.5
+             6.0
+                                                                                                                                                     12.5
+
+Stop-Loss
+             5.5
+             5.0
+             4.5                                                                                                                                     10.0
+             4.0
+             3.5
+             3.0                                                                                                                                     7.5
+             2.5
+             2.0                                                                                                                                     5.0
+             1.5
+             1.0
+             0.5                                                                                                                                     2.5
+             0.0
+                   0.0   0.5   1.0   1.5   2.0   2.5   3.0   3.5   4.0   4.5   5.0   5.5   6.0   6.5   7.0   7.5   8.0   8.5   9.0   9.5   10.0
+                                                                       Profit-Taking
+
+                                     FIGURE 13.11                  Heat-map for {E0 [Pi,Ti ], 𝜏, 𝜎} = {10, 5, 1}
+
+
+                                                    Forecast=10  H-L=10  Sigma=1
+               10.0                                                                                                                                   18
+                9.5
+                9.0
+                                                                                                                                                      16
+                8.5
+                8.0
+                7.5                                                                                                                                   14
+                7.0
+                6.5                                                                                                                                   12
+                6.0
+
+
+   Stop-Loss
+                5.5                                                                                                                                   10
+                5.0
+                4.5
+                4.0                                                                                                                                   8
+                3.5
+                3.0                                                                                                                                   6
+                2.5
+                2.0                                                                                                                                   4
+                1.5
+                1.0
+                0.5                                                                                                                                   2
+                0.0
+                      0.0   0.5   1.0   1.5   2.0   2.5   3.0   3.5   4.0   4.5   5.0   5.5   6.0   6.5   7.0   7.5   8.0   8.5   9.0   9.5   10.0
+                                                                         Profit-Taking
+
+                                     FIGURE 13.12                Heat-map for {E0 [Pi,Ti ], 𝜏, 𝜎} = {10, 10, 1}
+EXPERIMENTAL RESULTS                                                                                                                                   185
+
+                                                     Forecast=10  H-L=25  Sigma=1
+                10.0                                                                                                                                   8
+                 9.5
+                 9.0
+                 8.5                                                                                                                                   7
+                 8.0
+                 7.5
+                                                                                                                                                       6
+                 7.0
+                 6.5
+                 6.0                                                                                                                                   5
+
+    Stop-Loss
+                 5.5
+                 5.0
+                 4.5                                                                                                                                   4
+                 4.0
+                 3.5                                                                                                                                   3
+                 3.0
+                 2.5
+                 2.0                                                                                                                                   2
+                 1.5
+                 1.0
+                                                                                                                                                       1
+                 0.5
+                 0.0
+                       0.0   0.5   1.0   1.5   2.0   2.5   3.0   3.5   4.0   4.5   5.0   5.5   6.0   6.5   7.0   7.5   8.0   8.5   9.0   9.5   10.0
+                                                                          Profit-Taking
+
+                                    FIGURE 13.13                  Heat-map for {E0 [Pi,Ti ], 𝜏, 𝜎} = {10, 25, 1}
+
+
+                                                  Forecast=10  H-L=50  Sigma=1
+             10.0
+              9.5                                                                                                                                     1.8
+              9.0
+              8.5                                                                                                                                     1.6
+              8.0
+              7.5                                                                                                                                     1.4
+              7.0
+              6.5
+              6.0                                                                                                                                     1.2
+
+
+ Stop-Loss
+              5.5
+              5.0                                                                                                                                     1.0
+              4.5
+              4.0                                                                                                                                     0.8
+              3.5
+              3.0
+              2.5                                                                                                                                     0.6
+              2.0
+              1.5                                                                                                                                     0.4
+              1.0
+              0.5                                                                                                                                     0.2
+              0.0
+                    0.0   0.5   1.0   1.5   2.0   2.5   3.0   3.5   4.0   4.5   5.0   5.5   6.0   6.5   7.0   7.5   8.0   8.5   9.0   9.5   10.0
+                                                                        Profit-Taking
+
+                                    FIGURE 13.14                  Heat-map for {E0 [Pi,Ti ], 𝜏, 𝜎} = {10, 50, 1}
+186                                                                                               BACKTESTING ON SYNTHETIC DATA
+
+
+                                                  Forecast=10  H-L=100  Sigma=1
+             10.0
+              9.5
+              9.0
+                                                                                                                                                   0.6
+              8.5
+              8.0
+              7.5
+              7.0                                                                                                                                  0.5
+              6.5
+              6.0
+
+
+ Stop-Loss
+              5.5                                                                                                                                  0.4
+              5.0
+              4.5
+              4.0
+                                                                                                                                                   0.3
+              3.5
+              3.0
+              2.5
+              2.0                                                                                                                                  0.2
+              1.5
+              1.0
+              0.5                                                                                                                                  0.1
+              0.0
+                    0.0   0.5   1.0   1.5   2.0   2.5   3.0   3.5   4.0   4.5   5.0   5.5   6.0   6.5   7.0   7.5   8.0   8.5   9.0   9.5   10.0
+                                                                      Profit-Taking
+
+                                  FIGURE 13.15                 Heat-map for {E0 [Pi,Ti ], 𝜏, 𝝈} = {10, 100, 1}
+
+
+                                                  Forecast=–5  H-L=5  Sigma=1
+             10.0
+              9.5
+              9.0                                                                                                                                  –2
+              8.5
+              8.0
+              7.5                                                                                                                                  –4
+              7.0
+              6.5
+              6.0
+
+
+ Stop-Loss
+              5.5                                                                                                                                  –6
+              5.0
+              4.5
+              4.0                                                                                                                                  –8
+              3.5
+              3.0
+              2.5                                                                                                                                  –10
+              2.0
+              1.5
+              1.0
+                                                                                                                                                   –12
+              0.5
+              0.0
+                    0.0   0.5   1.0   1.5   2.0   2.5   3.0   3.5   4.0   4.5   5.0   5.5   6.0   6.5   7.0   7.5   8.0   8.5   9.0   9.5   10.0
+                                                                      Profit-Taking
+
+                                      FIGURE 13.16              Heat-map for {E0 [Pi,Ti ], 𝜏, 𝜎} = {−5, 5, 1}
+EXPERIMENTAL RESULTS                                                                                                                               187
+
+appears as if one is a rotated complementary of the other. Figure 13.6 resembles a
+rotated photographic negative of Figure 13.16. The reason is that the profit in Figure
+13.6 is translated into a loss in Figure 13.16, and the loss in Figure 13.6 is translated
+into a profit in Figure 13.16. One case is a reverse image of the other, just as a
+gambler’s loss is the house’s gain.
+   As expected, Sharpe ratios are negative, with a worst performance region centered
+around the stop-loss of 6, and profit-taking thresholds that range between 4 and 10.
+Now the rectangular shape does not correspond to a region of best performance, but
+to a region of worst performance, with Sharpe ratios of around −12.
+   In Figure 13.17, 𝜏 = 10, and now the proximity to a random walk plays in our
+favor. The region of worst performance spreads out, and the rectangular area becomes
+a square. Performance becomes less negative, with Sharpe ratios of about −9.
+   This familiar progression can be appreciated in Figures 13.18, 13.19, and 13.20,
+as 𝜏 is raised to 25, 50, and 100. Again, as the process approaches a random walk,
+performance flattens and optimizing the trading rule becomes a backtest-overfitting
+exercise.
+   Figures 13.21 through 13.25 repeat the same process for E0 [Pi,Ti ] = −10 and 𝜏
+that is progressively increased from 5 to 10, 25, 50, and 100. The same pattern, a
+rotated complementary to the case of positive long-run equilibrium, arises.
+
+
+
+                                                  Forecast=–5  H-L=10  Sigma=1
+             10.0
+              9.5
+              9.0
+              8.5                                                                                                                                  –2
+              8.0
+              7.5
+              7.0
+              6.5
+                                                                                                                                                   –4
+              6.0
+
+
+ Stop-Loss
+              5.5
+              5.0
+              4.5
+              4.0                                                                                                                                  –6
+              3.5
+              3.0
+              2.5
+              2.0                                                                                                                                  –8
+              1.5
+              1.0
+              0.5
+              0.0
+                    0.0   0.5   1.0   1.5   2.0   2.5   3.0   3.5   4.0   4.5   5.0   5.5   6.0   6.5   7.0   7.5   8.0   8.5   9.0   9.5   10.0
+                                                                      Profit-Taking
+
+                                  FIGURE 13.17                 Heat-map for {E0 [Pi,Ti ], 𝜏, 𝜎} = {−5, 10, 1}
+188                                                                                              BACKTESTING ON SYNTHETIC DATA
+
+
+                                                 Forecast=–5  H-L=25  Sigma=1
+            10.0
+             9.5
+             9.0
+             8.5                                                                                                                                  –0.5
+             8.0
+             7.5
+             7.0
+             6.5                                                                                                                                  –1.0
+             6.0
+
+
+Stop-Loss
+             5.5
+             5.0
+             4.5                                                                                                                                  –1.5
+             4.0
+             3.5
+             3.0
+             2.5                                                                                                                                  –2.0
+             2.0
+             1.5
+             1.0
+             0.5
+             0.0                                                                                                                                  –2.5
+                   0.0   0.5   1.0   1.5   2.0   2.5   3.0   3.5   4.0   4.5   5.0   5.5   6.0   6.5   7.0   7.5   8.0   8.5   9.0   9.5   10.0
+                                                                     Profit-Taking
+
+                                 FIGURE 13.18                  Heat-map for {E0 [Pi,Ti ], 𝜏, 𝜎} = {−5, 25, 1}
+
+
+                                                 Forecast=–5  H-L=50  Sigma=1
+            10.0
+                                                                                                                                                  –0.1
+             9.5
+             9.0
+             8.5                                                                                                                                  –0.2
+             8.0
+             7.5
+             7.0                                                                                                                                  –0.3
+             6.5
+             6.0
+
+
+Stop-Loss
+             5.5                                                                                                                                  –0.4
+             5.0
+             4.5                                                                                                                                  –0.5
+             4.0
+             3.5
+             3.0                                                                                                                                  –0.6
+             2.5
+             2.0
+             1.5                                                                                                                                  –0.7
+             1.0
+             0.5
+                                                                                                                                                  –0.8
+             0.0
+                   0.0   0.5   1.0   1.5   2.0   2.5   3.0   3.5   4.0   4.5   5.0   5.5   6.0   6.5   7.0   7.5   8.0   8.5   9.0   9.5   10.0
+                                                                     Profit-Taking
+
+                                 FIGURE 13.19                  Heat-map for {E0 [Pi,Ti ], 𝜏, 𝜎} = {−5, 50, 1}
+EXPERIMENTAL RESULTS                                                                                                                                189
+
+                                             Forecast=–5  H-L=100  Sigma=1
+            10.0
+             9.5                                                                                                                                  –0.05
+             9.0
+             8.5
+             8.0                                                                                                                                  –0.10
+             7.5
+             7.0
+             6.5                                                                                                                                  –0.15
+             6.0
+
+
+Stop-Loss
+             5.5
+             5.0                                                                                                                                  –0.20
+             4.5
+             4.0
+             3.5                                                                                                                                  –0.25
+             3.0
+             2.5
+             2.0
+                                                                                                                                                  –0.30
+             1.5
+             1.0
+             0.5
+             0.0                                                                                                                                  –0.35
+                   0.0   0.5   1.0   1.5   2.0   2.5   3.0   3.5   4.0   4.5   5.0   5.5   6.0   6.5   7.0   7.5   8.0   8.5   9.0   9.5   10.0
+                                                                     Profit-Taking
+
+                                     FIGURE 13.20              Heat-map for {E0 [Pi,Ti ], 𝜏, 𝜎} = {−5, 100, 1}
+
+
+                                                 Forecast=–10  H-L=5  Sigma=1
+            10.0
+             9.5                                                                                                                                  –2.5
+             9.0
+             8.5
+             8.0                                                                                                                                  –5.0
+             7.5
+             7.0                                                                                                                                  –7.5
+             6.5
+             6.0
+
+
+Stop-Loss
+             5.5                                                                                                                                  –10.0
+             5.0
+             4.5                                                                                                                                  –12.5
+             4.0
+             3.5
+             3.0                                                                                                                                  –15.0
+             2.5
+             2.0                                                                                                                                  –17.5
+             1.5
+             1.0
+             0.5                                                                                                                                  –20.0
+             0.0
+                   0.0   0.5   1.0   1.5   2.0   2.5   3.0   3.5   4.0   4.5   5.0   5.5   6.0   6.5   7.0   7.5   8.0   8.5   9.0   9.5   10.0
+                                                                     Profit-Taking
+
+                                     FIGURE 13.21                  Heat-map for {E0 [Pi,Ti ], 𝜏, 𝜎} = {−10, 5, 1}
+190                                                                                                BACKTESTING ON SYNTHETIC DATA
+
+
+                                               Forecast=–10  H-L=10  Sigma=1
+              10.0
+               9.5                                                                                                                                  –2
+               9.0
+               8.5
+                                                                                                                                                    –4
+               8.0
+               7.5
+               7.0                                                                                                                                  –6
+               6.5
+               6.0                                                                                                                                  –8
+
+ Stop-Loss
+               5.5
+               5.0
+                                                                                                                                                    –10
+               4.5
+               4.0
+               3.5                                                                                                                                  –12
+               3.0
+               2.5                                                                                                                                  –14
+               2.0
+               1.5
+                                                                                                                                                    –16
+               1.0
+               0.5
+               0.0                                                                                                                                  –18
+                     0.0   0.5   1.0   1.5   2.0   2.5   3.0   3.5   4.0   4.5   5.0   5.5   6.0   6.5   7.0   7.5   8.0   8.5   9.0   9.5   10.0
+                                                                       Profit-Taking
+
+                                   FIGURE 13.22                 Heat-map for {E0 [Pi,Ti ], 𝜏, 𝜎} = {−10, 10, 1}
+
+
+                                                   Forecast=–10  H-L=25  Sigma=1
+              10.0
+               9.5
+                                                                                                                                                    –1
+               9.0
+               8.5
+               8.0                                                                                                                                  –2
+               7.5
+               7.0
+                                                                                                                                                    –3
+               6.5
+               6.0
+
+
+  Stop-Loss
+               5.5                                                                                                                                  –4
+               5.0
+               4.5
+               4.0                                                                                                                                  –5
+               3.5
+               3.0                                                                                                                                  –6
+               2.5
+               2.0
+               1.5                                                                                                                                  –7
+               1.0
+               0.5                                                                                                                                  –8
+               0.0
+                     0.0   0.5   1.0   1.5   2.0   2.5   3.0   3.5   4.0   4.5   5.0   5.5   6.0   6.5   7.0   7.5   8.0   8.5   9.0   9.5   10.0
+                                                                       Profit-Taking
+
+                                   FIGURE 13.23                 Heat-map for {E0 [Pi,Ti ], 𝜏, 𝝈} = {−10, 25, 1}
+EXPERIMENTAL RESULTS                                                                                                                               191
+
+                                             Forecast=–10  H-L=50  Sigma=1
+            10.0
+                                                                                                                                                  –0.2
+             9.5
+             9.0
+             8.5                                                                                                                                  –0.4
+             8.0
+             7.5                                                                                                                                  –0.6
+             7.0
+             6.5
+                                                                                                                                                  –0.8
+             6.0
+
+
+Stop-Loss
+             5.5
+             5.0                                                                                                                                  –1.0
+             4.5
+             4.0                                                                                                                                  –1.2
+             3.5
+             3.0
+                                                                                                                                                  –1.4
+             2.5
+             2.0
+             1.5                                                                                                                                  –1.6
+             1.0
+             0.5                                                                                                                                  –1.8
+             0.0
+                   0.0   0.5   1.0   1.5   2.0   2.5   3.0   3.5   4.0   4.5   5.0   5.5   6.0   6.5   7.0   7.5   8.0   8.5   9.0   9.5   10.0
+                                                                     Profit-Taking
+
+                                 FIGURE 13.24                 Heat-map for {E0 [Pi,Ti ], 𝜏, 𝜎} = {−10, 50, 1}
+
+
+                                             Forecast=–10  H-L=100  Sigma=1
+            10.0
+             9.5                                                                                                                                  –0.1
+             9.0
+             8.5
+             8.0                                                                                                                                  –0.2
+             7.5
+             7.0
+             6.5
+                                                                                                                                                  –0.3
+             6.0
+
+
+Stop-Loss
+             5.5
+             5.0
+             4.5                                                                                                                                  –0.4
+             4.0
+             3.5
+             3.0                                                                                                                                  –0.5
+             2.5
+             2.0
+             1.5
+                                                                                                                                                  –0.6
+             1.0
+             0.5
+             0.0
+                   0.0   0.5   1.0   1.5   2.0   2.5   3.0   3.5   4.0   4.5   5.0   5.5   6.0   6.5   7.0   7.5   8.0   8.5   9.0   9.5   10.0
+                                                                     Profit-Taking
+
+                                FIGURE 13.25                  Heat-map for {E0 [Pi,Ti ], 𝜏, 𝜎} = {−10, 100, 1}
+192                                                 BACKTESTING ON SYNTHETIC DATA
+
+13.7   CONCLUSION
+
+In this chapter we have shown how to determine experimentally the optimal trading
+strategy associated with prices following a discrete O-U process. Because the deriva-
+tion of such trading strategy is not the result of a historical simulation, our procedure
+avoids the risks associated with overfitting the backtest to a single path. Instead, the
+optimal trading rule is derived from the characteristics of the underlying stochastic
+process that drives prices. The same approach can be applied to processes other than
+O-U, and we have focused on this particular process only for educational purposes.
+   While we do not derive the closed-form solution to the optimal trading strategies
+problem in this chapter, our experimental results seem to support the following OTR
+conjecture:
+
+ Conjecture: Given a financial instrument’s price characterized by a discrete
+ O-U process, there is a unique optimal trading rule in terms of a combination
+ of profit-taking and stop-loss that maximizes the rule’s Sharpe ratio.
+
+    Given that these optimal trading rules can be derived numerically within a few
+seconds, there is little practical incentive to obtain a closed-form solution. As it is
+becoming more common in mathematical research, the experimental analysis of a
+conjecture can help us achieve a goal even in the absence of a proof. It could take years
+if not decades to prove the above conjecture, and yet all experiments conducted so
+far confirm it empirically. Let me put it this way: The probability that this conjecture
+is false is negligible relative to the probability that you will overfit your trading rule
+by disregarding the conjecture. Hence, the rational course of action is to assume that
+the conjecture is right, and determine the OTR through synthetic data. In the worst
+case, the trading rule will be suboptimal, but still it will almost surely outperform an
+overfit trading rule.
+
+
+EXERCISES
+
+13.1 Suppose you are an execution trader. A client calls you with an order to cover a
+     short position she entered at a price of 100. She gives you two exit conditions:
+     profit-taking at 90 and stop-loss at 105.
+     (a) Assuming the client believes the price follows an O-U process, are these
+          levels reasonable? For what parameters?
+     (b) Can you think of an alternative stochastic process under which these levels
+          make sense?
+13.2 Fit the time series of dollar bars of E-mini S&P 500 futures to an O-U process.
+     Given those parameters:
+     (a) Produce a heat-map of Sharpe ratios for various profit-taking and stop-loss
+          levels.
+     (b) What is the OTR?
+REFERENCES                                                                                     193
+
+13.3 Repeat exercise 2, this time on a time series of dollar bars of
+     (a) 10-year U.S. Treasure Notes futures
+     (b) WTI Crude Oil futures
+     (c) Are the results significantly different? Does this justify having execution
+         traders specialized by product?
+13.4 Repeat exercise 2 after splitting the time series into two parts:
+     (a) The first time series ends on 3/15/2009.
+     (b) The second time series starts on 3/16/2009.
+     (c) Are the OTRs significantly different?
+13.5 How long do you estimate it would take to derive OTRs on the 100 most liquid
+     futures contracts worldwide? Considering the results from exercise 4, how often
+     do you think you may have to re-calibrate the OTRs? Does it make sense to pre-
+     compute this data?
+13.6 Parallelize Snippets 13.1 and 13.2 using the mpEngine module described in
+     Chapter 20.
+
+
+REFERENCES
+
+Bailey, D. and M. López de Prado (2012): “The Sharpe ratio efficient frontier.” Journal of Risk,
+     Vol. 15, No. 2, pp. 3–44. Available at http://ssrn.com/abstract=1821643.
+Bailey, D. and M. López de Prado (2013): “Drawdown-based stop-outs and the triple penance rule.”
+     Journal of Risk, Vol. 18, No. 2, pp. 61–93. Available at http://ssrn.com/abstract=2201302.
+Bailey, D., J. Borwein, M. López de Prado, and J. Zhu (2014): “Pseudo-mathematics and finan-
+     cial charlatanism: The effects of backtest overfitting on out-of-sample performance.” Notices
+     of the American Mathematical Society, 61(5), pp. 458–471. Available at http://ssrn.com/
+     abstract=2308659.
+Bailey, D., J. Borwein, M. López de Prado, and J. Zhu (2017): “The probability of backtest over-
+     fitting.” Journal of Computational Finance, Vol. 20, No. 4, pp. 39–70. Available at http://ssrn
+     .com/abstract=2326253.
+Bertram, W. (2009): “Analytic solutions for optimal statistical arbitrage trading.” Working paper.
+     Available at http://ssrn.com/abstract=1505073.
+Easley, D., M. Lopez de Prado, and M. O’Hara (2011): “The exchange of flow-toxicity.” Journal of
+     Trading, Vol. 6, No. 2, pp. 8–13. Available at http://ssrn.com/abstract=1748633.

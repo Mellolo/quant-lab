@@ -1,0 +1,410 @@
+CHAPTER 10
+
+
+
+
+       Bet Sizing
+
+
+
+
+10.1   MOTIVATION
+
+There are fascinating parallels between strategy games and investing. Some of the
+best portfolio managers I have worked with are excellent poker players, perhaps more
+so than chess players. One reason is bet sizing, for which Texas Hold’em provides a
+great analogue and training ground. Your ML algorithm can achieve high accuracy,
+but if you do not size your bets properly, your investment strategy will inevitably
+lose money. In this chapter we will review a few approaches to size bets from ML
+predictions.
+
+
+10.2   STRATEGY-INDEPENDENT BET SIZING APPROACHES
+
+Consider two strategies on the same instrument. Let mi,t ∈ [−1, 1] be the bet size of
+strategy i at time t, where mi,t = −1 indicates a full short position and mi,t = 1 indi-
+cates a full long position. Suppose that one strategy produced a sequence of bet sizes
+[m1,1 , m1,2 , m1,3 ] = [.5, 1, 0], as the market price followed a sequence [p1 , p2 , p3 ] =
+[1, .5, 1.25], where pt is the price at time t. The other strategy produced a sequence
+[m2,1 , m2,2 , m2,3 ] = [1, .5, 0], as it was forced to reduce its bet size once the market
+moved against the initial full position. Both strategies produced forecasts that turned
+out to be correct (the price increased by 25% between p1 and p3 ), however the first
+strategy made money (0.5) while the second strategy lost money (−.125).
+    We would prefer to size positions in such way that we reserve some cash for the
+possibility that the trading signal strengthens before it weakens. One option is to
+compute the series ct = ct,l − ct,s , where ct,l is the number of concurrent long bets at
+time t, and ct,s is the number of concurrent short bets at time t. This bet concurrency is
+derived, for each side, similarly to how we computed label concurrency in Chapter 4
+(recall the t1 object, with overlapping time spans). We fit a mixture of two Gaussians
+                                                                                        141
+142                                                                                         BET SIZING
+
+on {ct }, applying a method like the one described in López de Prado and Foreman
+[2014]. Then, the bet size is derived as
+
+                                      ⎧ F[ct ] − F[0] if c ≥ 0
+                                      ⎪ 1 − F[0]          t
+                                 mt = ⎨
+                                      ⎪ F[ct ] − F[0] if c < 0
+                                      ⎩     F[0]          t
+
+
+where F[x] is the CDF of the fitted mixture of two Gaussians for a value x. For exam-
+ple, we could size the bet as 0.9 when the probability of observing a signal of greater
+value is only 0.1. The stronger the signal, the smaller the probability that the signal
+becomes even stronger, hence the greater the bet size.
+   A second solution is to follow a budgeting approach. We compute the maximum
+number (or some other quantile) of concurrent long bets, maxi {ci,l }, and the max-
+imum number of concurrent short bets, maxi {ci,s }. Then we derive the bet size as
+mt = ct,l max 1{c } − ct,s max 1{c } , where ct,l is the number of concurrent long bets at
+               i   i,l          i   i,s
+time t, and ct,s is the number of concurrent short bets at time t. The goal is that the
+maximum position is not reached before the last concurrent signal is triggered.
+    A third approach is to apply meta-labeling, as we explained in Chapter 3. We fit a
+classifier, such as an SVC or RF, to determine the probability of misclassification, and
+use that probability to derive the bet size. 1 This approach has a couple of advantages:
+First, the ML algorithm that decides the bet sizes is independent of the primary model,
+allowing for the incorporation of features predictive of false positives (see Chap-
+ter 3). Second, the predicted probability can be directly translated into bet size. Let us
+see how.
+
+
+10.3    BET SIZING FROM PREDICTED PROBABILITIES
+
+Let us denote p [x] the probability that label x takes place. For two possible outcomes,
+x ∈ {−1, 1}, we would like to test the null hypothesis H0 : p [x = 1] = 12 . We compute
+                                p[x=1]− 21              2p[x=1]−1
+the test statistic z = √                        =    √                 ∼ Z, with z ∈ (−∞, +∞)
+                             p[x=1](1−p[x=1])       2 p[x=1](1−p[x=1])
+and where Z represents the standard Normal distribution. We derive the bet size as
+m = 2Z [z] − 1, where m ∈ [−1, 1] and Z [.] is the CDF of Z.
+   For more than two possible outcomes, we follow a one-versus-rest method. Let
+X = {−1, … , 0, … , 1} be various labels associated with bet sizes, and x ∈ X the pre-
+dicted label. In other words, the label is identified by the bet size associated with it. For
+                                                                   ∑‖X‖
+each label i = 1, … , ‖X‖, we estimate a probability pi , with i=1 pi = 1. We define
+
+1 The references section lists a number of articles that explain how these probabilities are derived. Usu-
+
+ ally these probabilities incorporate information about the goodness of the fit, or confidence in the
+ prediction. See Wu et al. [2004], and visit http://scikit-learn.org/stable/modules/svm.html#scores-and-
+ probabilities.
+     BET SIZING FROM PREDICTED PROBABILITIES                                               143
+
+
+
+
+                              FIGURE 10.1       Bet size from predicted probabilities
+
+
+                                                                                       1 2
+     p̃ = maxi {pi } as the probability of x, and we would like to test for H0 : ̃p = ‖X‖ . We
+                                           ̃p− 1
+     compute the test statistic z = √ ‖X‖ ∼ Z, with z ∈ [0 , +∞). We derive the bet size
+                                            p̃ (1−̃p)
+     as m = x (2Z [z] − 1), where m ∈ [−1, 1] and Z [z] regulates the size for a prediction
+              ⏟⏞⏞⏞⏟⏞⏞⏞⏟
+                    ∈[0,1]
+     x (where the side is implied by x).
+        Figure 10.1 plots the bet size as a function of test statistic. Snippet 10.1 implements
+     the translation from probabilities to bet size. It handles the possibility that the predic-
+     tion comes from a meta-labeling estimator, as well from a standard labeling estimator.
+     In step #2, it also averages active bets, and discretizes the final value, which we will
+     explain in the following sections.
+
+
+
+
+     SNIPPET 10.1            FROM PROBABILITIES TO BET SIZE
+def getSignal(events,stepSize,prob,pred,numClasses,numThreads,**kargs):
+    # get signals from predictions
+    if prob.shape[0]==0:return pd.Series()
+    #1) generate signals from multinomial classification (one-vs-rest, OvR)
+    signal0=(prob-1./numClasses)/(prob*(1.-prob))**.5 # t-value of OvR
+    signal0=pred*(2*norm.cdf(signal0)-1) # signal=side*size
+
+
+     2 Uncertainty is absolute when all outcomes are equally likely.
+     144                                                                             BET SIZING
+
+    if 'side' in events:signal0*=events.loc[signal0.index,'side'] # meta-labeling
+    #2) compute average signal among those concurrently open
+    df0=signal0.to_frame('signal').join(events[['t1']],how='left')
+    df0=avgActiveSignals(df0,numThreads)
+    signal1=discreteSignal(signal0=df0,stepSize=stepSize)
+    return signal1
+
+
+
+
+     10.4   AVERAGING ACTIVE BETS
+
+     Every bet is associated with a holding period, spanning from the time it originated to
+     the time the first barrier is touched, t1 (see Chapter 3). One possible approach is to
+     override an old bet as a new bet arrives; however, that is likely to lead to excessive
+     turnover. A more sensible approach is to average all sizes across all bets still active at a
+     given point in time. Snippet 10.2 illustrates one possible implementation of this idea.
+
+
+
+     SNIPPET 10.2 BETS ARE AVERAGED AS LONG AS THEY ARE
+     STILL ACTIVE
+def avgActiveSignals(signals,numThreads):
+    # compute the average signal among those active
+    #1) time points where signals change (either one starts or one ends)
+    tPnts=set(signals['t1'].dropna().values)
+    tPnts=tPnts.union(signals.index.values)
+    tPnts=list(tPnts);tPnts.sort()
+    out=mpPandasObj(mpAvgActiveSignals,('molecule',tPnts),numThreads,signals=signals)
+    return out
+#———————————————————————————————————————
+def mpAvgActiveSignals(signals,molecule):
+  ’’’
+  At time loc, average signal among those still active.
+  Signal is active if:
+      a) issued before or at loc AND
+      b) loc before signal's endtime, or endtime is still unknown (NaT).
+  ’’’
+  out=pd.Series()
+  for loc in molecule:
+      df0=(signals.index.values<=loc)&((loc<signals['t1'])|pd.isnull(signals['t1']))
+      act=signals[df0].index
+      if len(act)>0:out[loc]=signals.loc[act,'signal'].mean()
+      else:out[loc]=0 # no signals active at this time
+  return out
+
+
+
+
+     10.5   SIZE DISCRETIZATION
+
+     Averaging reduces some of the excess turnover, but still it is likely that small trades
+     will be triggered with every prediction. As this jitter would cause unnecessary
+DYNAMIC BET SIZES AND LIMIT PRICES                                                         145
+
+
+
+
+                       FIGURE 10.2     Discretization of the bet size, d = 0.2
+
+                                                                    [ ]
+overtrading, I suggest you discretize the bet size as m∗ = round md d, where d ∈
+(0, 1] determines the degree of discretization. Figure 10.2 illustrates the discretiza-
+tion of the bet size. Snippet 10.3 implements this notion.
+
+
+
+SNIPPET 10.3 SIZE DISCRETIZATION TO PREVENT
+OVERTRADING
+       def discreteSignal(signal0,stepSize):
+           # discretize signal
+           signal1=(signal0/stepSize).round()*stepSize # discretize
+           signal1[signal1>1]=1 # cap
+           signal1[signal1<-1]=-1 # floor
+           return signal1
+
+
+
+
+10.6    DYNAMIC BET SIZES AND LIMIT PRICES
+
+Recall the triple-barrier labeling method presented in Chapter 3. Bar i is formed
+at time ti,0 , at which point we forecast the first barrier that will be touched. That
+prediction implies a forecasted price, Eti,0 [pti,1 ], consistent with the barriers’ settings.
+In the period elapsed until the outcome takes place, t ∈ [ti,0 , ti,1 ], the price pt fluctuates
+and additional forecasts may be formed, Etj,0 [pti,1 ], where j ∈ [i + 1, I] and tj,0 ≤ ti,1 .
+In Sections 10.4 and 10.5 we discussed methods for averaging the active bets and
+146                                                                                    BET SIZING
+
+discretizing the bet size as new forecasts are formed. In this section we will introduce
+an approach to adjust bet sizes as market price pt and forecast price fi fluctuate. In the
+process, we will derive the order’s limit price.
+   Let qt be the current position, Q the maximum absolute position size, and ̂qi,t the
+target position size associated with forecast fi , such that
+
+                                  q̂ i,t = int[m[𝜔, fi − pt ]Q]
+
+                                                  x
+                                     m [𝜔, x] = √
+                                                 𝜔 + x2
+
+where m [𝜔, x] is the bet size, x = fi − pt is the divergence between the current market
+price and the forecast, 𝜔 is a coefficient that regulates the width of the sigmoid func-
+tion, and Int [x] is the integer value of x. Note that for a real-valued price divergence
+x, −1 < m [𝜔, x] < 1, the integer value q̂ i,t is bounded −Q < ̂qi,t < Q.
+    The target position size ̂qi,t can be dynamically adjusted as pt changes. In particu-
+lar, as pt → fi we get q̂ i,t → 0, because the algorithm wants to realize the gains. This
+implies a breakeven limit price ̄p for the order size q̂ i,t − qt , to avoid realizing losses.
+In particular,
+
+                                                     q̂ i,t |
+                                                    |∑                  [          ]
+                                   1                                             j
+                       p̄ =                                            L fi , 𝜔,
+                            |̂qi,t − qt |                                        Q
+                                            j=|qt +sgn[ ̂qi,t −qt ]|
+
+
+where L[fi , 𝜔, m] is the inverse function of m[𝜔, fi − pt ] with respect to pt ,
+                                                    √
+                                                                   𝜔
+                               L[fi , 𝜔, m] = fi − m
+                                                                 1 − m2
+
+   We do not need to worry about the case m2 = 1, because |̂qi,t | < 1. Since this
+function is monotonic, the algorithm cannot realize losses as pt → fi .
+   Let us calibrate 𝜔. Given a user-defined pair (x, m∗ ), such that x = fi − pt and m∗ =
+m [𝜔, x], the inverse function of m [𝜔, x] with respect to 𝜔 is
+
+                                      𝜔 = x2 (m∗ −2 − 1)
+
+   Snippet 10.4 implements the algorithm that computes the dynamic position size
+and limit prices as a function of pt and fi . First, we calibrate the sigmoid function,
+so that it returns a bet size of m∗ = .95 for a price divergence of x = 10. Second,
+we compute the target position q̂ i,t for a maximum position Q = 100, fi = 115 and
+pt = 100. If you try fi = 110, you will get q̂ i,t = 95, consistent with the calibration
+of 𝜔. Third, the limit price for this order of size q̂ i,t − qt = 97 is pt < 112.3657 < fi ,
+which is between the current price and the forecasted price.
+   DYNAMIC BET SIZES AND LIMIT PRICES                                                  147
+
+
+
+   SNIPPET 10.4      DYNAMIC POSITION SIZE AND LIMIT PRICE
+def betSize(w,x):
+    return x*(w+x**2)**-.5
+#———————————————————————————————————————
+def getTPos(w,f,mP,maxPos):
+    return int(betSize(w,f-mP)*maxPos)
+#———————————————————————————————————————
+def invPrice(f,w,m):
+    return f-m*(w/(1-m**2))**.5
+#———————————————————————————————————————
+def limitPrice(tPos,pos,f,w,maxPos):
+    sgn=(1 if tPos>=pos else -1)
+    lP=0
+    for j in xrange(abs(pos+sgn),abs(tPos+1)):
+        lP+=invPrice(f,w,j/float(maxPos))
+    lP/=tPos-pos
+    return lP
+#———————————————————————————————————————
+def getW(x,m):
+  # 0<alpha<1
+    return x**2*(m**-2–1)
+#———————————————————————————————————————
+def main():
+    pos,maxPos,mP,f,wParams=0,100,100,115,{'divergence':10,'m':.95}
+    w=getW(wParams['divergence'],wParams['m']) # calibrate w
+    tPos=getTPos(w,f,mP,maxPos) # get tPos
+    lP=limitPrice(tPos,pos,f,w,maxPos) # limit price for order
+    return
+#———————————————————————————————————————
+if __name__=='__main__':main()
+
+
+
+
+      As an alternative to the sigmoid function, we could have used a power function
+   ̃ [𝜔, x] = sgn [x] |x|𝜔 , where 𝜔 ≥ 0, x ∈ [−1, 1], which results in m
+   m                                                                    ̃ [𝜔, x] ∈ [−1, 1].
+   This alternative presents the advantages that:
+
+      r m̃ [𝜔, −1] = −1, m̃ [𝜔, 1] = 1.
+      r Curvature can be directly manipulated through 𝜔.
+      r For 𝜔 > 1, the function goes from concave to convex, rather than the other way
+        around, hence the function is almost flat around the inflexion point.
+
+      We leave the derivation of the equations for a power function as an exercise. Figure
+   10.3 plots the bet sizes (y-axis) as a function of price divergence f − pt (x-axis) for
+   both the sigmoid and power functions.
+148                                                                                       BET SIZING
+
+
+       1.0
+
+
+
+
+       0.5
+
+
+
+
+       0.0
+
+
+
+
+      –0.5
+
+
+
+
+      –1.0
+         –1.0               –0.5                  0.0                  0.5                   1.0
+
+ FIGURE 10.3    f [x] = sgn [x] |x|2 (concave to convex) and f [x] = x(.1 + x2 )−.5 (convex to concave)
+
+
+
+
+EXERCISES
+
+10.1 Using the formulation in Section 10.3, plot the bet size (m) as a function of the
+     maximum predicted probability (̃p) when ‖X‖ = 2, 3, … , 10.
+10.2 Draw 10,000 random numbers from a uniform distribution with bounds
+     U[.5, 1.].
+     (a) Compute the bet sizes m for ‖X‖ = 2.
+     (b) Assign 10,000 consecutive calendar days to the bet sizes.
+     (c) Draw 10,000 random numbers from a uniform distribution with bounds
+         U [1, 25].
+     (d) Form a pandas series indexed by the dates in 2.b, and with values equal
+         to the index shifted forward the number of days in 2.c. This is a t1 object
+         similar to the ones we used in Chapter 3.
+     (e) Compute the resulting average active bets, following Section 10.4.
+10.3 Using the t1 object from exercise 2.d:
+     (a) Determine the maximum number of concurrent long bets, c̄ l .
+     (b) Determine the maximum number of concurrent short bets, c̄ s .
+      (c) Derive the bet size as mt = ct,l ̄c1 − ct,s ̄c1 , where ct,l is the number of con-
+                                              l          s
+          current long bets at time t, and ct,s is the number of concurrent short bets at
+          time t.
+BIBLIOGRAPHY                                                                                    149
+
+10.4 Using the t1 object from exercise 2.d:
+     (a) Compute the series ct = ct,l − ct,s , where ct,l is the number of concurrent
+         long bets at time t, and ct,s is the number of concurrent short bets at time t.
+     (b) Fit a mixture of two Gaussians on {ct }. You may want to use the method
+         described in López de Prado and Foreman [2014].
+                                        ⎧ F[ct ]−F[0]
+                                        ⎪ 1−F[0]        if ct ≥ 0
+     (c) Derive the bet size as mt = ⎨                            , where F [x] is the CDF
+                                           F [ct ]−F[0]
+                                        ⎪ F[0]          if ct < 0
+                                        ⎩
+         of the fitted mixture of two Gaussians for a value x.
+     (d) Explain how this series {mt } differ from the bet size series computed in
+         exercise 3.
+10.5 Repeat exercise 1, where you discretize m with a stepSize=.01,
+     stepSize=.05, and stepSize=.1.
+10.6 Rewrite the equations in Section 10.6, so that the bet size is determined by a
+     power function rather than a sigmoid function.
+10.7 Modify Snippet 10.4 so that it implements the equations you derived in exer-
+     cise 6.
+
+
+REFERENCES
+
+López de Prado, M. and M. Foreman (2014): “A mixture of Gaussians approach to mathematical
+     portfolio oversight: The EF3M algorithm.” Quantitative Finance, Vol. 14, No. 5, pp. 913–930.
+Wu, T., C. Lin and R. Weng (2004): “Probability estimates for multi-class classification by pairwise
+     coupling.” Journal of Machine Learning Research, Vol. 5, pp. 975–1005.
+
+
+BIBLIOGRAPHY
+
+Allwein, E., R. Schapire, and Y. Singer (2001): “Reducing multiclass to binary: A unifying approach
+     for margin classifiers.” Journal of Machine Learning Research, Vol. 1, pp. 113–141.
+Hastie, T. and R. Tibshirani (1998): “Classification by pairwise coupling.” The Annals of Statistics,
+     Vol. 26, No. 1, pp. 451–471.
+Refregier, P. and F. Vallet (1991): “Probabilistic approach for multiclass classification with neural
+     networks.” Proceedings of International Conference on Artificial Networks, pp. 1003–1007.

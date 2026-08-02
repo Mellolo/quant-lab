@@ -1,0 +1,449 @@
+CHAPTER 21
+
+
+
+
+       Brute Force and Quantum Computers
+
+
+
+
+21.1   MOTIVATION
+
+Discrete mathematics appears naturally in multiple ML problems, including hier-
+archical clustering, grid searches, decisions based on thresholds, and integer opti-
+mization. Sometimes, these problems do not have a known analytical (closed-form)
+solution, or even a heuristic to approximate it, and our only hope is to search for it
+through brute force. In this chapter, we will study how a financial problem, intractable
+to modern supercomputers, can be reformulated as an integer optimization problem.
+Such a representation makes it amenable to quantum computers. From this example
+the reader can infer how to translate his particular financial ML intractable problem
+into a quantum brute force search.
+
+
+21.2   COMBINATORIAL OPTIMIZATION
+
+Combinatorial optimization problems can be described as problems where there is a
+finite number of feasible solutions, which result from combining the discrete values
+of a finite number of variables. As the number of feasible combinations grows, an
+exhaustive search becomes impractical. The traveling salesman problem is an exam-
+ple of a combinatorial optimization problem that is known to be NP hard (Woeginger
+[2003]), that is, the category of problems that are at least as hard as the hardest prob-
+lems solvable is nondeterministic polynomial time.
+    What makes an exhaustive search impractical is that standard computers evaluate
+and store the feasible solutions sequentially. But what if we could evaluate and store
+all feasible solutions at once? That is the goal of quantum computers. Whereas the
+bits of a standard computer can only adopt one of two possible states ({0, 1}) at once,
+quantum computers rely on qubits, which are memory elements that may hold a linear
+superposition of both states. In theory, quantum computers can accomplish this thanks
+                                                                                     319
+320                                        BRUTE FORCE AND QUANTUM COMPUTERS
+
+to quantum mechanical phenomena. In some implementations, qubits can support
+currents flowing in two directions at once, hence providing the desired superposition.
+This linear superposition property is what makes quantum computers ideally suited
+for solving NP-hard combinatorial optimization problems. See Williams [2010] for
+a general treatise on the capabilities of quantum computers.
+    The best way to understand this approach is through a particular example. We
+will now see how a dynamic portfolio optimization problem subject to generic trans-
+action cost functions can be represented as a combinatorial optimization problem,
+tractable to quantum computers. Unlike Garleanu and Pedersen [2012], we will not
+assume that the returns are drawn from an IID Gaussian distribution. This problem
+is particularly relevant to large asset managers, as the costs from excessive turnover
+and implementation shortfall may critically erode the profitability of their investment
+strategies.
+
+
+
+21.3   THE OBJECTIVE FUNCTION
+
+Consider a set on assets X = {xi }, i = 1, … , N, with returns following a multivari-
+ate Normal distribution at each time horizon h = 1, … , H, with varying mean and
+variance. We will assume that the returns are multivariate Normal, time-independent,
+however not identically distributed through time. We define a trading trajectory as
+an NxH matrix 𝜔 that determines the proportion of capital allocated to each of the N
+assets over each of the H horizons. At a particular horizon h = 1, … , H, we have a
+forecasted mean 𝜇h , a forecasted variance Vh and a forecasted transaction cost func-
+tion 𝜏h [𝜔]. This means that, given a trading trajectory 𝜔, we can compute a vector of
+expected investment returns r, as
+
+                                r = diag[𝜇′ 𝜔] − 𝜏 [𝜔]
+
+where 𝜏 [𝜔] can adopt any functional form. Without loss of generality, consider the
+following:
+
+                        √
+   r 𝜏1 [𝜔] = ∑N         |𝜔n,1 − 𝜔∗ |
+                 n=1 cn,1|        n|
+              ∑         √
+   r 𝜏h [𝜔] =   N        |              |
+                n=1 cn,h |𝜔n,h − 𝜔n,h−1 |, for h = 2, … , H
+   r 𝜔∗ is the initial allocation to instrument n, n = 1, … , N
+       n
+
+
+𝜏 [𝜔] is an Hx1 vector of transaction costs. In words, the transaction costs associ-
+ated with each asset are the sum of the square roots of the changes in capital allo-
+cations, re-scaled by an asset-specific factor Ch = {cn,h }n=1,…,N that changes with
+h. Thus, Ch is an Nx1 vector that determines the relative transaction cost across
+assets.
+AN INTEGER OPTIMIZATION APPROACH                                                     321
+
+   The Sharpe Ratio (Chapter 14) associated with r can be computed as (𝜇h being net
+of the risk-free rate)
+                                           ∑H      ′
+                                              h=1 𝜇h 𝜔h − 𝜏h [𝜔]
+                             SR [r] =        √
+                                              ∑H        ′
+                                                  h=1 𝜔h Vh 𝜔h
+
+
+
+21.4     THE PROBLEM
+
+We would like to compute the optimal trading trajectory that solves the problem
+
+                                           max SR [r]
+                                             𝜔
+                                   ∑
+                                   N
+                          s.t. :         |𝜔i,h | = 1, ∀h = 1, … , H
+                                   i=1
+
+   This problem attempts to compute a global dynamic optimum, in contrast to the
+static optimum derived by mean-variance optimizers (see Chapter 16). Note that non-
+continuous transaction costs are embedded in r. Compared to standard portfolio opti-
+mization applications, this is not a convex (quadratic) programming problem for at
+least three reasons: (1) Returns are not identically distributed, because 𝜇h and Vh
+change with h. (2) Transaction costs 𝜏h [𝜔] are non-continuous and changing with h.
+(3) The objective function SR [r] is not convex. Next, we will show how to calcu-
+late solutions without making use of any analytical property of the objective function
+(hence the generalized nature of this approach).
+
+
+21.5     AN INTEGER OPTIMIZATION APPROACH
+
+The generality of this problem makes it intractable to standard convex optimization
+techniques. Our solution strategy is to discretize it so that it becomes amenable to
+integer optimization. This in turn allows us to use quantum computing technology to
+find the optimal solution.
+
+
+21.5.1    Pigeonhole Partitions
+Suppose that we count the number of ways that K units of capital can be allocated
+among N assets, where we assume K > N. This is equivalent to finding the number
+of non-negative(integer solutions
+                         )        to x1 + … + xN = K, which has the nice combina-
+torial solution K N+ N− 1− 1 . This bears a similarity to the classic integer partitioning
+problem in number theory for which Hardy and Ramanujan (and later, Rademacher)
+proved an asymptotic expression (see Johansson [2012]). While order does not mat-
+ter in the partition problem, order is very relevant to the problem we have at hand.
+322                                              BRUTE FORCE AND QUANTUM COMPUTERS
+
+
+
+                               Asset 1                                             Asset 1
+                               Asset 2                                             Asset 2
+                               Asset 3                                             Asset 3
+
+
+
+
+                Units of capital                                 Units of capital
+
+            FIGURE 21.1    Partitions (1, 2, 3) and (3, 2, 1) must be treated as different
+
+
+For example, if K = 6 and N = 3, partitions (1, 2, 3) and (3, 2, 1) must be treated as
+different (obviously (2, 2, 2) does not need to be permutated). Figure 21.1 illustrates
+how order is important when allocating 6 units of capital to 3 different assets. This
+means that we must consider all distinct permutations of each partition. Even though
+there is a nice combinatorial solution to find the number of such allocations, it may
+still be computationally intensive to find as K and N grow large. However, we can use
+Stirling’s approximation to easily arrive at an estimate.
+    Snippet 21.1 provides an efficient algorithm to generate the set of all parti-
+               {                      ∑            }
+tions, pK,N = {pi }i=1,…,N |pi ∈ 𝕎, N    i=1 pi = K , where 𝕎 are the natural numbers
+including zero (whole numbers).
+
+
+
+
+SNIPPET 21.1      PARTITIONS OF k OBJECTS INTO n SLOTS
+from itertools import combinations_with_replacement
+#———————————————————————————————————————
+def pigeonHole(k,n):
+    # Pigeonhole problem (organize k objects in n slots)
+    for j in combinations_with_replacement(xrange(n),k):
+        r=[0]*n
+        for i in j:
+            r[i]+=1
+        yield r
+AN INTEGER OPTIMIZATION APPROACH                                                         323
+
+21.5.2   Feasible Static Solutions
+We would like to compute the set of all feasible solutions at any given hori-
+zon h, which we denote Ω. Consider a partition set of K units into N assets,
+pK,N . For each partition {pi }i=1,…,N ∈ pK,N , we can define a vector of abso-
+                                                     ∑
+lute weights such that |𝜔i | = K1 pi , where N        i=1 |𝜔i | = 1 (the full-investment con-
+straint). This full-investment (without leverage) constraint implies that every weight
+can be either positive or negative, so for every vector of absolute weights
+{|𝜔i |}i=1,…,N we can generate 2N vectors of (signed) weights. This is accom-
+plished by multiplying the items in {|𝜔i |}i=1,…,N with the items of the Carte-
+sian product of {−1, 1} with N repetitions. Snippet 21.2 shows how to gen-
+erate
+{{ s the    set Ω of all vectors of weights associated with }              all partitions, Ω =
+        }|
+     j
+       p |{s }
+    K i | j j=1,…,N
+                       ∈ {−1, 1}x … x{−1, 1},{pi }i=1,…,N ∈ p          K,N   .
+                          ⏟⏞⏞⏞⏞⏞⏞⏞⏞⏞⏞⏞⏞⏟⏞⏞⏞⏞⏞⏞⏞⏞⏞⏞⏞⏞⏟
+                                     N
+
+
+
+
+SNIPPET 21.2 SET 𝛀 OF ALL VECTORS ASSOCIATED WITH
+ALL PARTITIONS
+import numpy as np
+from itertools import product
+#———————————————————————————————————————
+def getAllWeights(k,n):
+    #1) Generate partitions
+    parts,w=pigeonHole(k,n),None
+    #2) Go through partitions
+    for part_ in parts:
+        w_=np.array(part_)/float(k) # abs(weight) vector
+        for prod_ in product([-1,1],repeat=n): # add sign
+             w_signed_=(w_*prod_).reshape(-1,1)
+             if w is None:w=w_signed_.copy()
+             else:w=np.append(w,w_signed_,axis=1)
+    return w
+
+
+
+
+21.5.3   Evaluating Trajectories
+Given the set of all vectors Ω, we define the set of all possible trajectories Φ as the
+Cartesian product of Ω with H repetitions. Then, for every trajectory we can evalu-
+ate its transaction costs and SR, and select the trajectory with optimal performance
+across Φ. Snippet 21.3 implements this functionality. The object params is a list of
+dictionaries that contain the values of C, 𝜇, V.
+324                                         BRUTE FORCE AND QUANTUM COMPUTERS
+
+
+
+
+SNIPPET 21.3      EVALUATING ALL TRAJECTORIES
+import numpy as np
+from itertools import product
+#———————————————————————————————————————
+def evalTCosts(w,params):
+    # Compute t-costs of a particular trajectory
+    tcost=np.zeros(w.shape[1])
+    w_=np.zeros(shape=w.shape[0])
+    for i in range(tcost.shape[0]):
+        c_=params[i]['c']
+        tcost[i]=(c_*abs(w[:,i]-w_)**.5).sum()
+        w_=w[:,i].copy()
+    return tcost
+#———————————————————————————————————————
+def evalSR(params,w,tcost):
+    # Evaluate SR over multiple horizons
+    mean,cov=0,0
+    for h in range(w.shape[1]):
+        params_=params[h]
+        mean+=np.dot(w[:,h].T,params_['mean'])[0]-tcost[h]
+        cov+=np.dot(w[:,h].T,np.dot(params_['cov'],w[:,h]))
+    sr=mean/cov**.5
+    return sr
+#———————————————————————————————————————
+def dynOptPort(params,k=None):
+    # Dynamic optimal portfolio
+    #1) Generate partitions
+    if k is None:k=params[0]['mean'].shape[0]
+    n=params[0]['mean'].shape[0]
+    w_all,sr=getAllWeights(k,n),None
+    #2) Generate trajectories as cartesian products
+    for prod_ in product(w_all.T,repeat=len(params)):
+        w_=np.array(prod_).T # concatenate product into a trajectory
+        tcost_=evalTCosts(w_,params)
+        sr_=evalSR(params,w_,tcost_) # evaluate trajectory
+        if sr is None or sr<sr_: # store trajectory if better
+             sr,w=sr_,w_.copy()
+    return w
+
+
+
+
+    Note that this procedure selects an globally optimal trajectory without relying on
+convex optimization. A solution will be found even if the covariance matrices are
+ill-conditioned, transaction cost functions are non-continuous, etc. The price we pay
+for this generality is that calculating the solution is extremely computationally inten-
+sive. Indeed, evaluating all trajectories is similar to the traveling-salesman problem.
+A NUMERICAL EXAMPLE                                                             325
+
+Digital computers are inadequate for this sort of NP-complete or NP-hard problems;
+however, quantum computers have the advantage of evaluating multiple solutions at
+once, thanks to the property of linear superposition.
+    The approach presented in this chapter set the foundation for Rosenberg et
+al. [2016], which solved the optimal trading trajectory problem using a quantum
+annealer. The same logic can be applied to a wide range on financial problems
+involving path dependency, such as a trading trajectory. Intractable ML algorithm
+can be discretized and translated into a brute force search, intended for a quantum
+computer.
+
+
+21.6     A NUMERICAL EXAMPLE
+
+Below we illustrate how the global optimum can be found in practice, using a digital
+computer. A quantum computer would evaluate all trajectories at once, whereas the
+digital computer does this sequentially.
+
+
+21.6.1    Random Matrices
+Snippet 21.4 returns a random matrix of Gaussian values with known rank, which
+is useful in many applications (see exercises). You may want to consider this code
+the next time you want to execute multivariate Monte Carlo experiments, or scenario
+analyses.
+
+
+
+SNIPPET 21.4      PRODUCE A RANDOM MATRIX OF A GIVEN RANK
+import numpy as np
+#———————————————————————————————————————
+def rndMatWithRank(nSamples,nCols,rank,sigma=0,homNoise=True):
+    # Produce random matrix X with given rank
+    rng=np.random.RandomState()
+    U,_,_=np.linalg.svd(rng.randn(nCols,nCols))
+    x=np.dot(rng.randn(nSamples,rank),U[:,:rank].T)
+    if homNoise:
+        x+=sigma*rng.randn(nSamples,nCols) # Adding homoscedastic noise
+    else:
+        sigmas=sigma*(rng.rand(nCols)+.5) # Adding heteroscedastic noise
+        x+=rng.randn(nSamples,nCols)*sigmas
+    return x
+
+
+
+
+   Snippet 21.5 generates H vectors of means, covariance matrices, and transaction
+cost factors, C, 𝜇, V. These variables are stored in a params list.
+326                                         BRUTE FORCE AND QUANTUM COMPUTERS
+
+
+
+SNIPPET 21.5      GENERATE THE PROBLEM’S PARAMETERS
+import numpy as np
+#———————————————————————————————————————
+def genMean(size):
+    # Generate a random vector of means
+    rMean=np.random.normal(size=(size,1))
+    return rMean
+#———————————————————————————————————————
+    #1) Parameters
+    size,horizon=3,2
+    params=[]
+    for h in range(horizon):
+        x=rndMatWithRank(1000,3,3,0.)
+        mean_,cov_=genMean(size),np.cov(x,rowvar=False)
+        c_=np.random.uniform(size=cov_.shape[0])*np.diag(cov_)**.5
+        params.append({'mean':mean_,'cov':cov_,'c':c_})
+
+
+
+
+21.6.2   Static Solution
+Snippet 21.6 computes the performance of the trajectory that results from local (static)
+optima.
+
+
+SNIPPET 21.6      COMPUTE AND EVALUATE THE STATIC SOLUTION
+import numpy as np
+#———————————————————————————————————————
+def statOptPortf(cov,a):
+    # Static optimal porftolio
+    # Solution to the "unconstrained" portfolio optimization problem
+    cov_inv=np.linalg.inv(cov)
+    w=np.dot(cov_inv,a)
+    w/=np.dot(np.dot(a.T,cov_inv),a) # np.dot(w.T,a)==1
+    w/=abs(w).sum() # re-scale for full investment
+    return w
+#———————————————————————————————————————
+#2) Static optimal portfolios
+w_stat=None
+for params_ in params:
+    w_=statOptPortf(cov=params_['cov'],a=params_['mean'])
+    if w_stat is None:w_stat=w_.copy()
+    else:w_stat=np.append(w_stat,w_,axis=1)
+tcost_stat=evalTCosts(w_stat,params)
+sr_stat=evalSR(params,w_stat,tcost_stat)
+print 'static SR:',sr_stat
+EXERCISES                                                                     327
+
+21.6.3   Dynamic Solution
+Snippet 21.7 computes the performance associated with the globally dynamic optimal
+trajectory, applying the functions explained throughout the chapter.
+
+
+
+SNIPPET 21.7 COMPUTE AND EVALUATE THE
+DYNAMIC SOLUTION
+import numpy as np
+#———————————————————————————————————————
+#3) Dynamic optimal portfolios
+w_dyn=dynOptPort(params)
+tcost_dyn=evalTCosts(w_dyn,params)
+sr_dyn=evalSR(params,w_dyn,tcost_dyn)
+print 'dynamic SR:',sr_dyn
+
+
+
+
+EXERCISES
+                                                 ∑ (N)
+21.1 Using the pigeonhole argument, prove that N               N
+                                                  n=1 n = 2 − 1.
+21.2 Use Snippet 21.4 to produce random matrices of size (1000, 10), sigma = 1 and
+     (a) rank = 1. Plot the eigenvalues of the covariance matrix.
+     (b) rank = 5. Plot the eigenvalues of the covariance matrix.
+     (c) rank = 10. Plot the eigenvalues of the covariance matrix.
+     (d) What pattern do you observe? How would you connect it to Markowitz’s
+         curse (Chapter 16)?
+21.3 Run the numerical example in Section 21.6:
+     (a) Use size = 3, and compute the running time with timeit. Repeat 10
+         batches of 100 executions. How long did it take?
+     (b) Use size = 4, and timeit. Repeat 10 batches of 100 executions. How long
+         did it take?
+21.4 Review all snippets in this chapter.
+     (a) How many could be vectorized?
+     (b) How many could be parallelized, using the techniques from Chapter 20?
+     (c) If you optimize the code, by how much do you think you could speed it up?
+     (d) Using the optimized code, what is the problem dimensionality that could
+         be solved within a year?
+21.5 Under what circumstances would the globally dynamic optimal trajectory match
+     the sequence of local optima?
+     (a) Is that a realistic set of assumptions?
+     (b) If not,
+328                                               BRUTE FORCE AND QUANTUM COMPUTERS
+
+           (i) could that explain why naı̈ve solutions beat Markowitz’s (Chapter 16)?
+          (ii) why do you think so many firms spend so much effort in computing
+               sequences of local optima?
+
+
+REFERENCES
+
+Garleanu, N. and L. Pedersen (2012): “Dynamic trading with predictable returns and transaction
+     costs.” Journal of Finance, Vol. 68, No. 6, pp. 2309–2340.
+Johansson, F. (2012): “Efficient implementation of the Hardy-Ramanujan-Rademacher formula,”
+     LMS Journal of Computation and Mathematics, Vol. 15, pp. 341–359.
+Rosenberg, G., P. Haghnegahdar, P. Goddard, P. Carr, K. Wu, and M. López de Prado (2016): “Solv-
+     ing the optimal trading trajectory problem using a quantum annealer.” IEEE Journal of Selected
+     Topics in Signal Processing, Vol. 10, No. 6 (September), pp. 1053–1060.
+Williams, C. (2010): Explorations in Quantum Computing, 2nd ed. Springer.
+Woeginger, G. (2003): “Exact algorithms for NP-hard problems: A survey.” In Junger, M., G.
+     Reinelt, and G. Rinaldi: Combinatorial Optimization—Eureka, You Shrink! Lecture notes in
+     computer science, Vol. 2570, Springer, pp. 185–207.

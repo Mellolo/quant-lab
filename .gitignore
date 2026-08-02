@@ -1,0 +1,54 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Distribution
+*.whl
+*.tar.gz
+
+# Data cache (runtime generated)
+*.h5
+*.hdf5
+*.db
+
+# Claude Code
+.claude/
+
+# Qoder / import-linter / jq cache
+.qoder/
+.import_linter_cache/
+.jqcache/
+
+references/
+scripts/

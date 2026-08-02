@@ -1,0 +1,707 @@
+CHAPTER 17
+
+
+
+
+       Structural Breaks
+
+
+
+
+17.1    MOTIVATION
+
+In developing an ML-based investment strategy, we typically wish to bet when there
+is a confluence of factors whose predicted outcome offers a favorable risk-adjusted
+return. Structural breaks, like the transition from one market regime to another, is
+one example of such a confluence that is of particular interest. For instance, a mean-
+reverting pattern may give way to a momentum pattern. As this transition takes place,
+most market participants are caught off guard, and they will make costly mistakes.
+This sort of errors is the basis for many profitable strategies, because the actors on
+the losing side will typically become aware of their mistake once it is too late. Before
+they accept their losses, they will act irrationally, try to hold the position, and hope
+for a comeback. Sometimes they will even increase a losing position, in desperation.
+Eventually they will be forced to stop loss or stop out. Structural breaks offer some of
+the best risk/rewards. In this chapter, we will review some methods that measure the
+likelihood of structural breaks, so that informative features can be built upon them.
+
+
+
+17.2    TYPES OF STRUCTURAL BREAK TESTS
+
+We can classify structural break tests in two general categories:
+
+
+   r CUSUM tests: These test whether the cumulative forecasting errors signifi-
+       cantly deviate from white noise.
+   r Explosiveness tests: Beyond deviation from white noise, these test whether the
+       process exhibits exponential growth or collapse, as this is inconsistent with a
+       random walk or stationary process, and it is unsustainable in the long run.
+                                                                                    249
+250                                                                STRUCTURAL BREAKS
+
+       ◦ Right-tail unit-root tests: These tests evaluate the presence of exponential
+         growth or collapse, while assuming an autoregressive specification.
+       ◦ Sub/super-martingale tests: These tests evaluate the presence of exponen-
+         tial growth or collapse under a variety of functional forms.
+
+
+17.3     CUSUM TESTS
+
+In Chapter 2 we introduced the CUSUM filter, which we applied in the context of
+event-based sampling of bars. The idea was to sample a bar whenever some variable,
+like cumulative prediction errors, exceeded a predefined threshold. This concept can
+be further extended to test for structural breaks.
+
+17.3.1    Brown-Durbin-Evans CUSUM Test on Recursive Residuals
+This test was proposed by Brown, Durbin and Evans [1975]. Let us assume that at
+every observation t = 1, … , T, we count with an array of features xt predictive of a
+value yt . Matrix Xt is composed of the time series of features t ≤ T, {xi }i=1,…,t . These
+authors propose that we compute recursive least squares (RLS) estimates of 𝛽, based
+on the specification
+                                                ′
+                                         yt = 𝛽t xt + 𝜀t
+
+which is fit on subsamples ([1, k + 1], [1, k + 2], … , [1, T]), giving T − k least squares
+estimates (𝛽̂k+1 , … , 𝛽̂T ). We can compute the standardized 1-step ahead recursive
+residuals as
+
+                                              yt − 𝛽̂t−1 xt
+                                                     ′
+
+                                       𝜔̂ t =     √
+                                                     ft
+                                         [     ′( ′   )−1 ]
+                               ft = 𝜎̂ 𝜀2 1 + xt Xt Xt xt
+
+   The CUSUM statistic is defined as
+
+                                                ∑
+                                                t
+                                                  𝜔̂ j
+                                        St =
+                                               j=k+1
+                                                       𝜎̂ 𝜔
+
+
+                                         1 ∑
+                                              T
+                             𝜎̂ 𝜔2 =            (𝜔̂ − E[𝜔̂ t ])2
+                                       T − k t=k t
+
+   Under the null hypothesis that 𝛽 is some constant value, H0 : 𝛽t = 𝛽, then St ∼
+N[0, t − k − 1]. One caveat of this procedure is that the starting point is chosen arbi-
+trarily, and results may be inconsistent due to that.
+EXPLOSIVENESS TESTS                                                                   251
+
+17.3.2    Chu-Stinchcombe-White CUSUM Test on Levels
+This test follows Homm and Breitung [2012]. It simplifies the previous method by
+dropping {xt }t=1,…,T , and assuming that H0 : 𝛽t = 0, that is, we forecast no change
+(Et−1 [Δyt ] = 0). This will allow us to work directly with yt levels, hence reducing the
+computational burden. We compute the standardized departure of log-price yt relative
+to the log-price at yn , t > n, as
+                                                ( √        )−1
+                               Sn,t = (yt − yn ) 𝜎̂ t t − n
+
+                                                     ∑
+                                                     t
+                                 𝜎̂ t2 = (t − 1)−1         (Δyi )2
+                                                     i=2
+
+    Under the null hypothesis H0 : 𝛽t = 0, then Sn,t ∼ N[0, 1]. The time-dependent
+critical value for the one-sided test is
+                                         √
+                              c𝛼 [n, t] = b𝛼 + log[t − n]
+
+   These authors derived via Monte Carlo that b0.05 = 4.6. One disadvantage of this
+method is that the reference level yn is set somewhat arbitrarily. To overcome this
+pitfall, we could estimate Sn,t on a series of backward-shifting windows n ∈ [1, t],
+and pick St = sup {Sn,t }.
+               n∈[1,t]
+
+
+
+17.4     EXPLOSIVENESS TESTS
+
+Explosiveness tests can be generally divided between those that test for one bubble
+and those that test for multiple bubbles. In this context, bubbles are not limited to price
+rallies, but they also include sell-offs. Tests that allow for multiple bubbles are more
+robust in the sense that a cycle of bubble-burst-bubble will make the series appear to
+be stationary to single-bubble tests. Maddala and Kim [1998], and Breitung [2014]
+offer good overviews of the literature.
+
+17.4.1    Chow-Type Dickey-Fuller Test
+A family of explosiveness tests was inspired by the work of Gregory Chow, starting
+with Chow [1960]. Consider the first order autoregressive process
+
+                                      yt = 𝜌yt−1 + 𝜀t
+
+where 𝜀t is white noise. The null hypothesis is that yt follows a random walk, H0 :
+𝜌 = 1, and the alternative hypothesis is that yt starts as a random walk but changes at
+time 𝜏 ∗ T, where 𝜏 ∗ ∈ (0, 1), into an explosive process:
+                         {
+                              yt−1 + 𝜀t for t = 1, … , 𝜏 ∗ T
+             H1 : yt =
+                             𝜌yt−1 + 𝜀t for t = 𝜏 ∗ T + 1, … , T, with 𝜌 > 1
+252                                                                       STRUCTURAL BREAKS
+
+   At time T we can test for a switch (from random walk to explosive process) hav-
+ing taken place at time 𝜏 ∗ T (break date). In order to test this hypothesis, we fit the
+following specification,
+
+                                Δyt = 𝛿yt−1 Dt [𝜏 ∗ ] + 𝜀t
+
+where Dt [𝜏 ∗ ] is a dummy variable that takes zero value if t < 𝜏 ∗ T, and takes the value
+one if t ≥ 𝜏 ∗ T. Then, the null hypothesis H0 : 𝛿 = 0 is tested against the (one-sided)
+alternative H1 : 𝛿 > 1:
+
+                                                     𝛿̂
+                                      DFC𝜏 ∗ =
+                                                    𝜎̂ 𝛿
+
+    The main drawback of this method is that 𝜏 ∗ is unknown. To address this issue,
+Andrews [1993] proposed a new test where all possible 𝜏 ∗ are tried, within some
+interval 𝜏 ∗ ∈ [𝜏0 , 1 − 𝜏0 ]. As Breitung [2014] explains, we should leave out some of
+the possible 𝜏 ∗ at the beginning and end of the sample, to ensure that either regime
+is fitted with enough observations (there must be enough zeros and enough ones in
+Dt [𝜏 ∗ ]). The test statistic for an unknown 𝜏 ∗ is the maximum of all T(1 − 2𝜏0 ) values
+of DFC𝜏 ∗ .
+
+                             SDFC =         sup         {DFC𝜏 ∗ }
+                                       𝜏 ∗ ∈[𝜏0 ,1−𝜏0 ]
+
+
+   Another drawback of Chow’s approach is that it assumes that there is only one
+break date 𝜏 ∗ T, and that the bubble runs up to the end of the sample (there is no
+switch back to a random walk). For situations where three or more regimes (random
+walk → bubble → random walk …) exist, we need to discuss the Supremum Aug-
+mented Dickey-Fuler (SADF) test.
+
+
+17.4.2   Supremum Augmented Dickey-Fuller
+In the words of Phillips, Wu and Yu [2011], “standard unit root and cointegration tests
+are inappropriate tools for detecting bubble behavior because they cannot effectively
+distinguish between a stationary process and a periodically collapsing bubble model.
+Patterns of periodically collapsing bubbles in the data look more like data generated
+from a unit root or stationary autoregression than a potentially explosive process.” To
+address this flaw, these authors propose fitting the regression specification
+
+                                                  ∑
+                                                  L
+                          Δyt = 𝛼 + 𝛽yt−1 +               𝛾l Δyt−l + 𝜀t
+                                                  l=1
+
+where we test for H0 : 𝛽 ≤ 0, H1 : 𝛽 > 0. Inspired by Andrews [1993], Phillips and
+Yu [2011] and Phillips, Wu and Yu [2011] proposed the Supremum Augmented
+ EXPLOSIVENESS TESTS                                                                                                         253
+
+
+                                2.50                                                                                     6
+
+                                2.25
+
+
+
+
+Close price (after ETF trick)
+                                                                                                                         4
+                                2.00
+
+                                1.75
+                                                                                                                         2    SADF
+                                1.50
+
+                                1.25
+                                                                                                                         0
+                                1.00
+
+                                0.75
+                                                                                                                         –2
+
+                                       2004     2006       2008       2010        2012          2014           2016   2018
+
+                                         FIGURE 17.1     Prices (left y-axis) and SADF (right y-axis) over time
+
+
+ Dickey-Fuller test (SADF). SADF fits the above regression at each end point t with
+ backwards expanding start points, then computes
+                                                                                                {              }
+                                                                                                    𝛽̂t0 ,t
+                                              SADFt =      sup {ADFt ,t } =          sup
+                                                        t0 ∈[1,t−𝜏]       0
+                                                                                  t0 ∈[1,t−𝜏]       𝜎̂ 𝛽t ,t
+                                                                                                        0
+
+
+ where 𝛽̂t0 ,t is estimated on a sample that starts at t0 and ends at t, 𝜏 is the minimum
+ sample length used in the analysis, t0 is the left bound of the backwards expanding
+ window, and t = 𝜏, … , T. For the estimation of SADFt , the right side of the window
+ is fixed at t. The standard ADF test is a special case of SADFt , where 𝜏 = t − 1.
+     There are two critical differences between SADFt and SDFC: First, SADFt is com-
+ puted at each t ∈ [𝜏, T], whereas SDFC is computed only at T. Second, instead of
+ introducing a dummy variable, SADF recursively expands the beginning of the sam-
+ ple (t0 ∈ [1, t − 𝜏]). By trying all combinations of a nested double loop on (t0 , t),
+ SADF does not assume a known number of regime switches or break dates. Figure
+ 17.1 displays the series of E-mini S&P 500 futures prices after applying the ETF trick
+ (Chapter 2, Section 2.4.1), as well as the SADF derived from that price series. The
+ SADF line spikes when prices exhibit a bubble-like behavior, and returns to low levels
+ when the bubble bursts. In the following sections, we will discuss some enhancements
+ to Phillips’ original SADF method.
+
+ 17.4.2.1 Raw vs. Log Prices
+ It is common to find in the literature studies that carry out structural break tests on raw
+ prices. In this section we will explore why log prices should be preferred, particularly
+ when working with long time series involving bubbles and bursts.
+254                                                                STRUCTURAL BREAKS
+
+    For raw prices {yt }, if ADF’s null hypotesis is rejected, it means that prices are
+                                                                    y
+stationary, with finite variance. The implication is that returns y t − 1 are not time
+                                                                    t−1
+invariant, for returns’ volatility must decrease as prices rise and increase as prices
+fall in order to keep the price variance constant. When we run ADF on raw prices,
+we assume that returns’ variance is not invariant to price levels. If returns variance
+happens to be invariant to price levels, the model will be structurally heteroscedastic.
+    In contrast, if we work with log prices, the ADF specification will state that
+
+                                 Δlog[yt ] ∝ log[yt−1 ]
+
+   Let us make a change of variable, xt = kyt . Now, log[xt ] = log[k] + log[yt ], and
+the ADF specification will state that
+
+                           Δlog[xt ] ∝ log[xt−1 ] ∝ log[yt−1 ]
+
+   Under this alternative specification based on log prices, price levels condition
+returns’ mean, not returns’ volatility. The difference may not matter in practice for
+small samples, where k ≈ 1, but SADF runs regressions across decades and bubbles
+produce levels that are significantly different between regimes (k ≠ 1).
+
+17.4.2.2 Computational Complexity
+The algorithm runs in (n2 ), as the number of ADF tests that SADF requires for a
+total sample length T is
+
+                                                            (              )
+             ∑
+             T
+                            1                                    T −𝜏 +2
+                 t − 𝜏 + 1 = (T − 𝜏 + 2)(T − 𝜏 + 1) =
+             t=𝜏
+                            2                                       2
+
+   Consider a matrix representation of the ADF specification, where X ∈ ℝTxN and
+y ∈ ℝTx1 . Solving a single ADF regression involves the floating point operations
+(FLOPs) listed in Table 17.1.
+   This gives a total of f (N, T) = N 3 + N 2 (2T + 3) + N(4T − 1) + 2T + 2 FLOPs
+                                                                 ∑
+per ADF estimate. A single SADF update requires g(N, T, 𝜏) = Tt=𝜏 f (N, t) + T − 𝜏
+FLOPs (T − 𝜏 operations to find the maximum ADF stat), and the estimation of a full
+                       ∑
+SADF series requires Tt=𝜏 g(N, T, 𝜏).
+   Consider a dollar bar series on E-mini S&P 500 futures. For (T, N) = (356631,3),
+an ADF estimate requires 11,412,245 FLOPs, and a SADF update requires
+2,034,979,648,799 operations (roughly 2.035 TFLOPs). A full SADF time series
+requires 241,910,974,617,448,672 operations (roughly 242 PFLOPs). This number
+will increase quickly, as the T continues to grow. And this estimate excludes noto-
+riously expensive operations like alignment, pre-processing of data, I/O jobs, etc.
+Needless to say, this algorithm’s double loop requires a large number of operations.
+An HPC cluster running an efficiently parallelized implementation of the algorithm
+may be needed to estimate the SADF series within a reasonable amount of time.
+Chapter 20 will present some parallelization strategies useful in these situations.
+EXPLOSIVENESS TESTS                                                                        255
+
+                         TABLE 17.1      FLOPs per ADF Estimate
+
+                         Matrix Operation               FLOPs
+
+                         o1 = X ′ y                     (2T − 1)N
+                                ′
+                         o2 = X X                       (2T − 1)N 2
+                         o3 = o−1
+                               2
+                                                        N3 + N2 + N
+                         o4 = o3 o1                     2N 2 − N
+                         o5 = y − Xo4                   T + (2N − 1)T
+                                ′
+                         o6 = o5 o5                     2T − 1
+                                    1
+                         o7 = o3 o6                     2 + N2
+                                  T −N
+                              o [0, 0]
+                         o8 = √ 4                       1
+                               o7 [0, 0]
+
+
+17.4.2.3 Conditions for Exponential Behavior
+Consider the zero-lag specification on log prices, Δlog[yt ] = 𝛼 + 𝛽log[yt−1 ] + 𝜀t .
+This can be rewritten as log[̃yt ] = (1 + 𝛽)log[̃yt−1 ] + 𝜀t , where log[̃yt ] = log[yt ] + 𝛼𝛽 .
+Rolling back t discrete steps, we obtain E[log[̃yt ]] = (1 + 𝛽)t log[̃y0 ], or E[log[yt ]] =
+− 𝛼𝛽 + (1 + 𝛽)t (log[y0 ] + 𝛼𝛽 ). The index t can be reset at a given time, to project the
+future trajectory of y0 → yt after the next t steps. This reveals the conditions that
+characterize the three states for this dynamic system:
+
+    r Steady: 𝛽 < 0 ⇒ limt→∞ E[log[yt ]] = − 𝛼 .
+                                                    𝛽
+      ◦ The disequilibrium is log[yt ] − (− 𝛼 ) = log[̃yt ].
+                                                𝛽
+      ◦ Then E[log[̃yt ]] = (1 + 𝛽)t = 1 at t = − log[2] (half-life).
+              log[̃y ]                 2         log[1+𝛽]
+    r Unit-root: 𝛽 = 0, where the system is non-stationary, and behaves as a martin-
+                     0
+
+
+      gale.
+                                                            {
+                                                                −∞, if log [y0 ] < 𝛼𝛽
+    r Explosive: 𝛽 > 0, where limt→∞ E[log[yt ]] =                                    .
+                                                                +∞, if log [y0 ] > 𝛼𝛽
+
+17.4.2.4 Quantile ADF
+SADF takes the supremum of a series on t-values, SADFt = supt0 ∈[1,t−𝜏] {ADFt0 ,t }.
+Selecting the extreme value introduces some robustness problems, where SADF esti-
+mates could vary significantly depending on the sampling frequency and the specific
+timestamps of the samples. A more robust estimator of ADF extrema would be the
+following: First, let st = {ADFt0 ,t }t0 ∈[0,t1 −𝜏] . Second, we define Qt,q = Q[st , q] the q
+quantile of st , as a measure of centrality of high ADF values, where q ∈ [0, 1]. Third,
+we define Q̇ t,q,v = Qt,q+v − Qt,q−v , with 0 < v ≤ min{q, 1 − q}, as a measure of dis-
+persion of high ADF values. For example, we could set q = 0.95 and v = 0.025. Note
+256                                                                    STRUCTURAL BREAKS
+
+
+that SADF is merely a particular case of QADF, where SADFt = Qt,1 and Q̇ t,q,v is not
+defined because q = 1.
+
+
+17.4.2.5 Conditional ADF
+Alternatively, we can address concerns on SADF robustness by computing
+conditional moments. Let f [x] be the probability distribution function of st =
+                                                                       ∞
+{ADFt0 ,t }t0 ∈[1,t1 −𝜏] , with x ∈ st . Then, we define Ct,q = K −1 ∫Q xf [x]dx as a mea-
+                                                           √           t,q
+                                                                     ∞
+sure of centrality of high ADF values, and Ċ t,q = K −1 ∫Q (x − Ct,q )2 f [x]dx as
+                                                                   t,q
+a measure of dispersion of high ADF values, with regularization constant K =
+  ∞
+∫Q f [x]dx. For example, we could use q = 0.95.
+   t,q
+    By construction, Ct,q ≤ SADFt . A scatter plot of SADFt against Ct,q shows that
+lower boundary, as an ascending line with approximately unit gradient (see Figure
+17.2). When SADF grows beyond −1.5, we can appreciate some horizontal trajec-
+tories, consistent with a sudden widening of the right fat tail in st . In other words,
+(SADFt − Ct,q )∕Ċ t,q can reach significantly large values even if Ct,q is relatively
+small, because SADFt is sensitive to outliers.
+    Figure 17.3(a) plots (SADFt − Ct,q )∕Ċ t,q for the E-mini S&P 500 futures prices
+over time. Figure 17.3(b) is the scatter-plot of (SADFt − Ct,q )∕Ċ t,q against SADFt ,
+computed on the E-mini S&P 500 futures prices. It shows evidence that outliers in st
+bias SADFt upwards.
+
+
+
+
+       4
+
+
+       3
+
+
+       2
+
+
+       1
+
+
+       0
+
+
+      –1
+
+
+      –2
+
+
+             –2              0               2                4               6
+
+                       FIGURE 17.2    SADF (x-axis) vs CADF (y-axis)
+EXPLOSIVENESS TESTS                                                                                   257
+
+
+     14
+
+
+     12
+
+
+     10
+
+
+       8
+
+
+       6
+
+
+       4
+
+
+       2
+
+
+                 01      03        05        07        09        11         13       15        17
+            20         20        20        20        20        20        20        20          20
+                                                    Time
+                                                     (a)
+
+
+
+      14
+
+
+      12
+
+
+      10
+
+
+       8
+
+
+       6
+
+
+       4
+
+
+       2
+
+
+
+                 –2                0                  2                 4                  6
+                                                     (b)
+
+FIGURE 17.3       (a) (SADFt − Ct,q )∕Ċ t,q over time (b) (SADFt − Ct,q )∕Ċ t,q (y-axis) as a function of
+SADFt (x-axis)
+258                                                            STRUCTURAL BREAKS
+
+17.4.2.6 Implementation of SADF
+This section presents an implementation of the SADF algorithm. The purpose of this
+code is not to estimate SADF quickly, but to clarify the steps involved in its estima-
+tion. Snippet 17.1 lists SADF’s inner loop. That is the part that estimates SADFt =
+              𝛽̂t ,t
+   sup { 𝜎̂ 0 }, which is the backshifting component of the algorithm. The outer
+t0 ∈[1,t−𝜏]    𝛽t ,t
+                 0
+loop (not shown here) repeats this calculation for an advancing t, {SADFt }t=1,…,T .
+The arguments are:
+
+    r logP: a pandas series containing log-prices
+    r minSL: the minimum sample length (𝜏), used by the final regression
+    r constant: the regression’s time trend component
+      ◦ 'nc': no time trend, only a constant
+      ◦ 'ct': a constant plus a linear time trend
+      ◦ 'ctt': a constant plus a second-degree polynomial time trend
+    r lags: the number of lags used in the ADF specification
+
+
+
+SNIPPET 17.1           SADF’S INNER LOOP
+def get_bsadf(logP,minSL,constant,lags):
+    y,x=getYX(logP,constant=constant,lags=lags)
+    startPoints,bsadf,allADF=range(0,y.shape[0]+lags-minSL+1),None,[]
+    for start in startPoints:
+        y_,x_=y[start:],x[start:]
+        bMean_,bStd_=getBetas(y_,x_)
+        bMean_,bStd_=bMean_[0,0],bStd_[0,0]**.5
+        allADF.append(bMean_/bStd_)
+        if allADF[-1]>bsadf:bsadf=allADF[-1]
+    out={'Time':logP.index[-1],'gsadf':bsadf}
+    return out
+
+
+
+   Snippet 17.2 lists function getXY, which prepares the numpy objects needed to
+conduct the recursive tests.
+
+
+
+SNIPPET 17.2           PREPARING THE DATASETS
+def getYX(series,constant,lags):
+    series_=series.diff().dropna()
+    x=lagDF(series_,lags).dropna()
+    x.iloc[:,0]=series.values[-x.shape[0]-1:-1,0] # lagged level
+    y=series_.iloc[-x.shape[0]:].values
+EXPLOSIVENESS TESTS                                                               259
+
+    if constant!='nc':
+        x=np.append(x,np.ones((x.shape[0],1)),axis=1)
+        if constant[:2]=='ct':
+            trend=np.arange(x.shape[0]).reshape(-1,1)
+            x=np.append(x,trend,axis=1)
+        if constant=='ctt':
+            x=np.append(x,trend**2,axis=1)
+    return y,x
+
+
+
+    Snippet 17.3 lists function lagDF, which applies to a dataframe the lags specified
+in its argument lags.
+
+
+
+SNIPPET 17.3      APPLY LAGS TO DATAFRAME
+def lagDF(df0,lags):
+    df1=pd.DataFrame()
+    if isinstance(lags,int):lags=range(lags+1)
+    else:lags=[int(lag) for lag in lags]
+    for lag in lags:
+        df_=df0.shift(lag).copy(deep=True)
+        df_.columns=[str(i)+'_'+str(lag) for i in df_.columns]
+        df1=df1.join(df_,how='outer')
+    return df1
+
+
+
+   Finally, Snippet 17.4 lists function getBetas, which carries out the actual
+regressions.
+
+
+
+SNIPPET 17.4      FITTING THE ADF SPECIFICATION
+def getBetas(y,x):
+    xy=np.dot(x.T,y)
+    xx=np.dot(x.T,x)
+    xxinv=np.linalg.inv(xx)
+    bMean=np.dot(xxinv,xy)
+    err=y-np.dot(x,bMean)
+    bVar=np.dot(err.T,err)/(x.shape[0]-x.shape[1])*xxinv
+    return bMean,bVar
+
+
+
+
+17.4.3   Sub- and Super-Martingale Tests
+In this section we will introduce explosiveness tests that do not rely on the standard
+ADF specification. Consider a process that is either a sub- or super-martingale. Given
+260                                                                                     STRUCTURAL BREAKS
+
+some observations {yt }, we would like to test for the existence of an explosive time
+trend, H0 : 𝛽 = 0, H1 : 𝛽 ≠ 0, under alternative specifications:
+
+    r Polynomial trend (SM-Poly1):
+
+                                           yt = 𝛼 + 𝛾t + 𝛽t2 + 𝜀t
+
+    r Polynomial trend (SM-Poly2):
+
+                                         log[yt ] = 𝛼 + 𝛾t + 𝛽t2 + 𝜀t
+
+    r Exponential trend (SM-Exp):
+
+                                 yt = 𝛼e𝛽t + 𝜀t ⇒ log[yt ] = log[𝛼] + 𝛽t + 𝜉t
+
+    r Power trend (SM-Power):
+
+                          yt = 𝛼t𝛽 + 𝜀t ⇒ log[yt ] = log[𝛼] + 𝛽log[t] + 𝜉t
+
+   Similar to SADF, we fit any of these specifications to each end point t = 𝜏, … , T,
+with backwards expanding start points, then compute
+                                                                {               }
+                                                                    |𝛽̂ |
+                                                                    | t0 ,t |
+                                     SMTt =        sup
+                                               t0 ∈[1,t−𝜏]          𝜎̂ 𝛽t ,t
+                                                                         0
+
+
+   The reason for the absolute value is that we are equally interested in explosive
+growth and collapse. In the simple regression case (Greene [2008], p. 48), the vari-
+                          𝜎̂ 2
+ance of 𝛽 is 𝜎̂ 𝛽2 = 𝜎̂ 2 (t−t
+                            𝜀
+                               )
+                                 , hence limt→∞ 𝜎̂ 𝛽t ,t = 0. The same result is generalizable
+                     xx          0                          0
+to the multivariate linear regression case (Greene [2008], pp. 51–52). The 𝜎̂ 𝛽2 of a
+weak long-run bubble may be smaller than the 𝜎̂ 𝛽2 of a strong short-run bubble, hence
+biasing the method towards long-run bubbles. To correct for this bias, we can penal-
+ize large sample lengths by determining the coefficient 𝜑 ∈ [0, 1] that yields best
+explosiveness signals.
+                                                        {                           }
+                                                                   |𝛽̂t ,t |
+                                                                   | 0 |
+                                 SMTt =      sup
+                                          t0 ∈[1,t−𝜏]       𝜎̂ 𝛽t ,t (t − t0 )𝜑
+                                                                0
+
+
+   For instance, when 𝜑 = 0.5, we compensate for the lower 𝜎̂ 𝛽t ,t associated with
+                                                                   0
+longer sample lengths, in the simple regression case. For 𝜑 → 0, SMTt will exhibit
+longer trends, as that compensation wanes and long-run bubbles mask short-run bub-
+bles. For 𝜑 → 1, SMTt becomes noisier, because more short-run bubbles are selected
+over long-run bubbles. Consequently, this is a natural way to adjust the explosiveness
+REFERENCES                                                                               261
+
+signal, so that it filters opportunities targeting a particular holding period. The features
+used by the ML algorithm may include SMTt estimated from a wide range of 𝜑 values.
+
+
+EXERCISES
+
+17.1 On a dollar bar series on E-mini S&P 500 futures,
+     (a) Apply the Brown-Durbin-Evans method. Does it recognize the dot-com
+          bubble?
+     (b) Apply the Chu-Stinchcombe-White method. Does it find a bubble in 2007–
+          2008?
+17.2 On a dollar bar series on E-mini S&P 500 futures,
+     (a) Compute the SDFC (Chow-type) explosiveness test. What break date does
+          this method select? Is this what you expected?
+     (b) Compute and plot the SADF values for this series. Do you observe extreme
+          spikes around the dot-com bubble and before the Great Recession? Did the
+          bursts also cause spikes?
+17.3 Following on exercise 2,
+     (a) Determine the periods where the series exhibited
+          (i) Steady conditions
+         (ii) Unit-Root conditions
+        (iii) Explosive conditions
+     (b) Compute QADF.
+     (c) Compute CADF.
+17.4 On a dollar bar series on E-mini S&P 500 futures,
+     (a) Compute SMT for SM-Poly1 and SM-Poly 2, where 𝜑 = 1. What is their
+          correlation?
+     (b) Compute SMT for SM-Exp, where 𝜑 = 1 and 𝜑 = 0.5. What is their corre-
+          lation?
+     (c) Compute SMT for SM-Power, where 𝜑 = 1 and 𝜑 = 0.5. What is their cor-
+          relation?
+17.5 If you compute the reciprocal of each price, the series {y−1
+                                                               t } turns bubbles into
+     bursts and bursts into bubbles.
+     (a) Is this transformation needed, to identify bursts?
+     (b) What methods in this chapter can identify bursts without requiring this
+          transformation?
+
+
+REFERENCES
+
+Andrews, D. (1993): “Tests for parameter instability and structural change with unknown change
+    point.” Econometrics, Vol. 61, No. 4 (July), pp. 821–856.
+262                                                                         STRUCTURAL BREAKS
+
+Breitung, J. and R. Kruse (2013): “When Bubbles Burst: Econometric Tests Based on Structural
+      Breaks.” Statistical Papers, Vol. 54, pp. 911–930.
+Breitung, J. (2014): “Econometric tests for speculative bubbles.” Bonn Journal of Economics, Vol.
+      3, No. 1, pp. 113–127.
+Brown, R.L., J. Durbin, and J.M. Evans (1975): “Techniques for Testing the Constancy of Regression
+      Relationships over Time.” Journal of the Royal Statistical Society, Series B, Vol. 35, pp. 149–
+      192.
+Chow, G. (1960). “Tests of equality between sets of coefficients in two linear regressions.” Econo-
+      metrica, Vol. 28, No. 3, pp. 591–605.
+Greene, W. (2008): Econometric Analysis, 6th ed. Pearson Prentice Hall.
+Homm, U. and J. Breitung (2012): “Testing for speculative bubbles in stock markets: A comparison
+      of alternative methods.” Journal of Financial Econometrics, Vol. 10, No. 1, 198–231.
+Maddala, G. and I. Kim (1998): Unit Roots, Cointegration and Structural Change, 1st ed. Cambridge
+      University Press.
+Phillips, P., Y. Wu, and J. Yu (2011): “Explosive behavior in the 1990s Nasdaq: When did exuberance
+      escalate asset values?” International Economic Review, Vol. 52, pp. 201–226.
+Phillips, P. and J. Yu (2011): “Dating the timeline of financial bubbles during the subprime crisis.”
+      Quantitative Economics, Vol. 2, pp. 455–491.
+Phillips, P., S. Shi, and J. Yu (2013): “Testing for multiple bubbles 1: Historical episodes of exuber-
+      ance and collapse in the S&P 500.” Working paper 8–2013, Singapore Management University.
