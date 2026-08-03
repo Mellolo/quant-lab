@@ -20,7 +20,7 @@ import json
 import os
 import re
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from jq.exceptions import JQAuthError
@@ -131,7 +131,7 @@ class CookieStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "cookies": cookies,
-            "updated_at": datetime.now(UTC).isoformat(timespec="seconds"),
+            "updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         }
         # 用 os.open + 0o600 确保新建文件权限即为 600
         fd = os.open(

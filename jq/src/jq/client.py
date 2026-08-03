@@ -32,6 +32,7 @@ import uuid
 from typing import Any
 from urllib.parse import urlparse
 
+import certifi
 import requests
 import websocket  # type: ignore[import-untyped]
 
@@ -317,10 +318,12 @@ class JupyterHubClient:
         status = "ok"
 
         try:
+            # macOS Python.org 默认无系统 CA；显式用 certifi，与 requests 一致
             ws = websocket.create_connection(
                 ws_url,
                 header=[f"Cookie: {cookie_header}", f"X-XSRFToken: {xsrf}"],
                 timeout=timeout,
+                sslopt={"ca_certs": certifi.where()},
             )
         except Exception as e:
             raise JQExecutionError(

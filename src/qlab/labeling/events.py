@@ -281,6 +281,199 @@ class EntropySampler(EventSampler):
         probs = probs[probs > 0]
         return -float(np.sum(probs * np.log2(probs)))
 
+class TrendBreakoutSampler(EventSampler):
+    """因果趋势突破采样器.
+
+    只用截至当日收盘的信息判断「当前可能处于趋势启动」，不使用未来数据:
+      1. **状态**: 效率比 ER(er_window) > er_threshold
+      2. **趋势方向**: close > MA(ma_window) 且 MA 斜率 > 0
+         斜率 = 当前 MA 相对 slope_lookback 个交易日前的变化
+      3. **触发**: 收盘创 breakout_window 日新高
+      4. **去重**: 触发后 cooldown_days 内不再触发
+
+    满足 PIT——所有量都只用 rolling window 内的历史数据。
+    """
+
+    def __init__(
+        self,
+        er_window: int = 20,
+        er_threshold: float = 0.3,
+        ma_window: int = 60,
+        slope_lookback: int = 20,
+        breakout_window: int = 20,
+        cooldown_days: int = 10,
+    ):
+        if er_window < 2:
+            raise ValueError("er_window 必须 >= 2")
+        if ma_window < 2:
+            raise ValueError("ma_window 必须 >= 2")
+        if breakout_window < 2:
+            raise ValueError("breakout_window 必须 >= 2")
+        self.er_window = er_window
+        self.er_threshold = er_threshold
+        self.ma_window = ma_window
+        self.slope_lookback = slope_lookback
+        self.breakout_window = breakout_window
+        self.cooldown_days = cooldown_days
+
+    def sample(self, prices: pd.DataFrame | pd.Series) -> pd.DatetimeIndex:
+        if isinstance(prices, pd.Series):
+            return self._sample_single(prices)
+        all_events: set[pd.Timestamp] = set()
+        for col in prices.columns:
+            events = self._sample_single(prices[col])
+            all_events.update(events.tolist())
+        return pd.DatetimeIndex(sorted(all_events))
+
+    def sample_per_symbol(self, prices: pd.DataFrame) -> pd.DataFrame:
+        rows = []
+        for col in prices.columns:
+            events = self._sample_single(prices[col])
+            for ts in events:
+                rows.append({"timestamp": ts, "symbol": col})
+        if not rows:
+            return pd.DataFrame(columns=["timestamp", "symbol"])
+        return pd.DataFrame(rows)
+
+    def _efficiency_ratio(self, close: pd.Series) -> pd.Series:
+        """Kaufman Efficiency Ratio (rolling, causal)."""
+        net = (close - close.shift(self.er_window)).abs()
+        path = close.diff().abs().rolling(self.er_window).sum()
+        return net / path.replace(0, np.nan)
+
+    def _sample_single(self, series: pd.Series) -> pd.DatetimeIndex:
+        close = series.dropna()
+        min_len = max(self.er_window, self.ma_window, self.breakout_window) + self.slope_lookback + 1
+        if len(close) < min_len:
+            return pd.DatetimeIndex([])
+
+        er = self._efficiency_ratio(close)
+        ma = close.rolling(self.ma_window).mean()
+        slope = (ma - ma.shift(self.slope_lookback)) / ma.shift(self.slope_lookback)
+        # 创 N 日新高（含当日）
+        breakout = close == close.rolling(self.breakout_window).max()
+
+        cond = (
+            (er > self.er_threshold)
+            & (close > ma)
+            & (slope > 0)
+            & breakout
+        )
+
+        events: list[pd.Timestamp] = []
+        last_i = -self.cooldown_days - 1
+        for i, ok in enumerate(cond):
+            if not ok or pd.isna(ok):
+                continue
+            if i - last_i <= self.cooldown_days:
+                continue
+            events.append(close.index[i])
+            last_i = i
+        return pd.DatetimeIndex(events)
+
+
+class HMMTrendSampler(EventSampler):
+    """因果 HMM 趋势状态采样器.
+
+    用滚动窗口在**历史数据**上拟合一个 2 状态高斯 HMM，推断当日属于
+    高波动趋势态的后验概率；概率从低于阈值升到高于阈值时触发事件。
+    全程只用截至当日的数据，满足 PIT。
+
+    实现要点
+    --------
+    - 每个 symbol 独立拟合，窗口 ``window`` 个交易日；
+    - 用前 ``burn_in`` 天建立「趋势态 = 平均收益绝对值更大」的映射，
+      之后逐日用 ``predict_proba`` 在线滤波（不再用未来数据重训）；
+    - 低流动性/停牌或拟合失败时跳过当日。
+    """
+
+    def __init__(
+        self,
+        window: int = 60,
+        prob_threshold: float = 0.7,
+        min_history: int = 30,
+        cooldown_days: int = 10,
+        n_iter: int = 25,
+        random_state: int = 0,
+    ):
+        if window < 10:
+            raise ValueError("window 必须 >= 10")
+        if not 0.0 < prob_threshold < 1.0:
+            raise ValueError("prob_threshold 必须在 (0, 1)")
+        self.window = window
+        self.prob_threshold = prob_threshold
+        self.min_history = min_history
+        self.cooldown_days = cooldown_days
+        self.n_iter = n_iter
+        self.random_state = random_state
+
+    def sample(self, prices: pd.DataFrame | pd.Series) -> pd.DatetimeIndex:
+        if isinstance(prices, pd.Series):
+            return self._sample_single(prices)
+        all_events: set[pd.Timestamp] = set()
+        for col in prices.columns:
+            events = self._sample_single(prices[col])
+            all_events.update(events.tolist())
+        return pd.DatetimeIndex(sorted(all_events))
+
+    def sample_per_symbol(self, prices: pd.DataFrame) -> pd.DataFrame:
+        rows = []
+        for col in prices.columns:
+            events = self._sample_single(prices[col])
+            for ts in events:
+                rows.append({"timestamp": ts, "symbol": col})
+        if not rows:
+            return pd.DataFrame(columns=["timestamp", "symbol"])
+        return pd.DataFrame(rows)
+
+    def _sample_single(self, series: pd.Series) -> pd.DatetimeIndex:
+        from hmmlearn.hmm import GaussianHMM  # 延迟导入, 保持 qlab 无硬依赖
+
+        close = series.dropna()
+        if len(close) < self.window + self.min_history:
+            return pd.DatetimeIndex([])
+
+        ret = np.log(close).diff().dropna()
+        events: list[pd.Timestamp] = []
+        last_i = -self.cooldown_days - 1
+        trend_state: int | None = None
+        prev_prob = 0.0
+
+        # 用滚动窗口逐步前进；只在窗口起点识别哪个状态是「趋势」
+        for i in range(self.min_history, len(ret)):
+            if i - last_i <= self.cooldown_days:
+                continue
+            hist = ret.iloc[max(0, i - self.window + 1) : i + 1].to_numpy().reshape(-1, 1)
+            if len(hist) < 5:
+                continue
+            try:
+                model = GaussianHMM(
+                    n_components=2,
+                    covariance_type="full",
+                    n_iter=self.n_iter,
+                    random_state=self.random_state,
+                )
+                model.fit(hist)
+                probs = model.predict_proba(hist)
+            except Exception:
+                continue
+
+            # 首次确定哪个分量是趋势态（平均 |ret| 更大）
+            if trend_state is None:
+                means = [float(np.mean(np.abs(hist[probs[:, s] > 0.5]))) for s in range(2)]
+                trend_state = int(np.argmax(means))
+                prev_prob = float(probs[-1, trend_state])
+                continue
+
+            p = float(probs[-1, trend_state])
+            if prev_prob < self.prob_threshold <= p:
+                events.append(ret.index[i])
+                last_i = i
+            prev_prob = p
+
+        return pd.DatetimeIndex(events)
+
+
 def to_event_dataframe(
     pairs: pd.DataFrame,
     *,

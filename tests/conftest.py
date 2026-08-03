@@ -25,7 +25,8 @@ REG_WARMUP = "2022-09-01"   # 特征回看窗口需要的额外历史
 def real_layer():
     """真实聚宽数据源的 DataLayer(会话级, 只建一次)."""
     os.environ.setdefault(
-        "JQ_CACHE_DIR", "/Users/mellolo/workplace/quant-lab/.jqcache"
+        "JQ_CACHE_DIR",
+        str(__import__("pathlib").Path(__file__).resolve().parents[1] / ".jqcache"),
     )
     pytest.importorskip("jq", reason="需要 jq 连接器")
     from qlab.data.layer import DataLayer
