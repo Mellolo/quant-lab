@@ -26,7 +26,8 @@ def real_layer():
     """真实聚宽数据源的 DataLayer(会话级, 只建一次)."""
     os.environ.setdefault(
         "JQ_CACHE_DIR",
-        str(__import__("pathlib").Path(__file__).resolve().parents[1] / ".jqcache"),
+        # qlab/tests/conftest.py → parents[2] = quant-lab/ 仓根
+        str(__import__("pathlib").Path(__file__).resolve().parents[2] / ".jqcache"),
     )
     pytest.importorskip("jq", reason="需要 jq 连接器")
     from qlab.data.layer import DataLayer

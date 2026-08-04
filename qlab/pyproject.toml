@@ -29,8 +29,8 @@ dev = [
     "mypy>=1.7",
     "import-linter>=2.0",
 ]
-# 聚宽数据源(JQDataSource). jq 是本仓内的独立包:
-#   pip install -e ./jq
+# 聚宽数据源(JQDataSource). jq 是 monorepo 内的独立包:
+#   pip install -e ./jq   (在 quant-lab/ 仓根执行)
 # 未安装时 qlab 仍可正常使用 FakeDataSource。
 jq = ["jq"]
 

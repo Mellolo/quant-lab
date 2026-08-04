@@ -19,7 +19,7 @@ pytest -m realdata                            # 全量真实数据回归
 pytest -m realdata -k RegressionFeatures      # 只回归 features 模块
 ```
 
-共享 fixture 在 `tests/conftest.py`（会话级，真实数据只拉一次）：
+共享 fixture 在 `qlab/tests/conftest.py`（会话级，真实数据只拉一次）：
 `real_layer` / `real_daily` / `real_close_wide` / `real_universe` / `real_labels`。
 
 ### 断言原则
