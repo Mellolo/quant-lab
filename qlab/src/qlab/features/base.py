@@ -14,6 +14,16 @@ import pandas as pd
 
 from qlab.core.enums import Freq
 
+#: 特征可知时点（相对计算所在交易日 T）
+#:
+#: - ``today_open``: T 开盘前/开盘时可知（竞价、隔夜、仅用 ≤T-1 收盘的量）
+#: - ``today_close``: T 收盘后可知（用到 T 日收盘/全日数据）
+#: - ``next_open``: 要等 T+1 开盘才可知（比 today_close 更晚的发布）
+FeatureAvailableAt = Literal["today_open", "today_close", "next_open"]
+FEATURE_AVAILABLE_AT: frozenset[str] = frozenset(
+    {"today_open", "today_close", "next_open"}
+)
+
 
 @dataclass(frozen=True)
 class FeatureMeta:
@@ -22,7 +32,7 @@ class FeatureMeta:
     name: str
     version: str
     lookback_days: int
-    available_at: Literal["today_close", "next_open"] = "today_close"
+    available_at: FeatureAvailableAt = "today_close"
     requires_intraday: bool = False
     intraday_freq: Freq | None = None
     dependencies: tuple[str, ...] = ()
@@ -30,6 +40,13 @@ class FeatureMeta:
     output_dtype: str = "float64"
     output_range: tuple[float, float] | None = None
     description: str = ""
+
+    def __post_init__(self) -> None:
+        if self.available_at not in FEATURE_AVAILABLE_AT:
+            raise ValueError(
+                f"FeatureMeta.available_at 非法: {self.available_at!r} "
+                f"(支持 {sorted(FEATURE_AVAILABLE_AT)})"
+            )
 
 
 @dataclass(frozen=True)

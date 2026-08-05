@@ -82,6 +82,8 @@ def feat_imp_mda(
     # 重要性：(baseline - permuted) / 最大可能改进
     imp = (-scr1).add(scr0, axis=0)
     imp = imp / -scr1 if scoring == "neg_log_loss" else imp / (1.0 - scr1)
+    # 置换后得分≈0 时会出现 ±inf/NaN; 与 mlfinlab 一致 scrub 为 0
+    imp = imp.replace([np.inf, -np.inf], np.nan).fillna(0.0)
 
     n = imp.shape[0]
     out = pd.concat(

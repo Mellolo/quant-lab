@@ -1,7 +1,7 @@
 """Triple-Barrier 标注法 — 书 Ch3 §3.4-3.5.
 
 设计：
-- Event 输入：(event_start, symbol, t1, target, side)
+- Event 输入：(event_start, symbol, t1, target, side[, entry_timing])
 - Label 输出：(event_start, symbol, bin, ret, touch_time, touch_type)
 """
 
@@ -12,6 +12,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+from qlab.core.enums import EntryTiming
 from qlab.core.parallel import mp_pandas_obj
 from qlab.core.schema import SCHEMA_LABEL, validate_schema
 
@@ -27,31 +28,82 @@ class TripleBarrier:
     sl: float = 1.0
 
 
+def _series_for_symbol(
+    prices: pd.DataFrame | pd.Series,
+    symbol: str,
+    field: str,
+) -> pd.Series:
+    """从宽表/长表里取出单标的、单字段的日期序列."""
+    if isinstance(prices.index, pd.MultiIndex):
+        try:
+            sub = prices.xs(symbol, level="symbol")
+        except KeyError:
+            return pd.Series(dtype=float)
+        if isinstance(sub, pd.DataFrame):
+            if field in sub.columns:
+                return sub[field]
+            if field == "close" and sub.shape[1] == 1:
+                return sub.iloc[:, 0]
+            return pd.Series(dtype=float)
+        # 已是 Series: 仅当调用方要 close 时视为该序列
+        return sub if field == "close" else pd.Series(dtype=float)
+
+    if isinstance(prices, pd.DataFrame):
+        if field in prices.columns:
+            return prices[field]
+        if field == "close" and prices.shape[1] == 1:
+            return prices.iloc[:, 0]
+        return pd.Series(dtype=float)
+    return prices if field == "close" else pd.Series(dtype=float)
+
+
+def _entry_timing_of(row: pd.Series) -> EntryTiming:
+    raw = row["entry_timing"] if "entry_timing" in row.index else EntryTiming.CLOSE
+    if pd.isna(raw) or raw == "":
+        return EntryTiming.CLOSE
+    return EntryTiming(str(raw))
+
+
 def _apply_barriers_single(
     events: pd.DataFrame,
     close: pd.DataFrame | pd.Series,
     pt: float,
     sl: float,
 ) -> pd.DataFrame:
-    """对一组 events 应用三屏障. 单 symbol / 单线程实现.
+    """对一组 events 应用三屏障. 单线程实现.
 
     输入
     ----
-    events : index 是 event_start，列含 t1 / target / side / symbol
-    close  : MultiIndex(date, symbol) 或单 symbol Series。
-             允许传入 close 列的 DataFrame（自动取 'close' 列降为 Series）。
+    events : index 是 event_start，列含 t1 / target / side / symbol，
+             可选 entry_timing（列缺失时按 close，兼容手写旧表；
+             ``to_event_dataframe`` 默认写入 open）
+    close  : MultiIndex(date, symbol) 的价格表。
+             - 开盘入场: 需 open + close（entry = open_T，盯市用 close）
+             - 收盘入场: 需 close 列（或单列 DataFrame / Series）
 
     返回
     ----
     DataFrame，index 同 events，列 [touch_time, touch_type, ret]
     """
     out = []
+    needs_open = (
+        "entry_timing" in events.columns
+        and (events["entry_timing"].astype(str) == EntryTiming.OPEN.value).any()
+    )
+    if needs_open:
+        if not (isinstance(close, pd.DataFrame) and "open" in close.columns):
+            raise ValueError(
+                "events 含 entry_timing='open'，但价格表缺少 open 列。\n"
+                "  传入含 ['open','close'] 的 DailyBar 子集，例如 "
+                "bars[['open','close']]。"
+            )
 
     for event_start, row in events.iterrows():
         symbol = row["symbol"]
         t1 = row["t1"]
         target = row["target"]
         side = row["side"] if "side" in row and not pd.isna(row["side"]) else 1.0
+        timing = _entry_timing_of(row)
 
         if pd.isna(target) or target <= 0:
             out.append({
@@ -60,31 +112,33 @@ def _apply_barriers_single(
             })
             continue
 
-        # 获取 [event_start, t1] 的价格路径（统一降为 Series）
-        if isinstance(close.index, pd.MultiIndex):
+        close_path = _series_for_symbol(close, symbol, "close").loc[event_start:t1]
+
+        if timing == EntryTiming.OPEN:
+            # 开盘入场: 至少需要当日一根 close 盯市；首日收益 = close_T/open_T - 1
+            if len(close_path) < 1:
+                out.append({
+                    "event_start": event_start,
+                    "touch_time": pd.NaT, "touch_type": "no_data", "ret": np.nan,
+                })
+                continue
+            open_series = _series_for_symbol(close, symbol, "open")
             try:
-                sub = close.xs(symbol, level="symbol")
+                entry_price = float(open_series.loc[event_start])
             except KeyError:
-                price_path = pd.Series(dtype=float)
-            else:
-                if isinstance(sub, pd.DataFrame):
-                    sub = sub["close"] if "close" in sub.columns else sub.iloc[:, 0]
-                price_path = sub.loc[event_start:t1]
+                entry_price = float("nan")
+            price_path = close_path
         else:
-            if isinstance(close, pd.DataFrame):
-                series = close["close"] if "close" in close.columns else close.iloc[:, 0]
-            else:
-                series = close
-            price_path = series.loc[event_start:t1]
+            # 收盘入场: 入场价 = 当日 close，至少还要一根后续 close
+            if len(close_path) < 2:
+                out.append({
+                    "event_start": event_start,
+                    "touch_time": pd.NaT, "touch_type": "no_data", "ret": np.nan,
+                })
+                continue
+            entry_price = float(close_path.iloc[0])
+            price_path = close_path
 
-        if len(price_path) < 2:
-            out.append({
-                "event_start": event_start,
-                "touch_time": pd.NaT, "touch_type": "no_data", "ret": np.nan,
-            })
-            continue
-
-        entry_price = price_path.iloc[0]
         if pd.isna(entry_price) or entry_price <= 0:
             out.append({
                 "event_start": event_start,
@@ -165,9 +219,13 @@ def label_events(
 
     参数
     ----
-    events : DataFrame, index=event_start, 必备列 [symbol, t1, target]，可选 [side]
-    close  : MultiIndex(date, symbol) 的 DataFrame, 单列 close（建议用后复权 close 算 PnL；
-             实务中 PnL 应用 close_raw, 但 ML 训练用后复权更稳）
+    events : DataFrame, index=event_start, 必备列 [symbol, t1, target]，
+             可选 [side, entry_timing]
+    close  : MultiIndex(date, symbol) 的价格 DataFrame。
+
+             - ``entry_timing='open'``（``to_event_dataframe`` 默认）:
+               **同一张表**需 ``open`` + ``close``；入场价取 open，盯市用 close。
+             - ``entry_timing='close'`` 或列缺失: 提供 ``close`` 即可。
     barrier : TripleBarrier(pt, sl)
     num_threads : 并行进程数。
 

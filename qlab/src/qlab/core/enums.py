@@ -37,6 +37,19 @@ class Session(StrEnum):
     CLOSE_AUCTION = "close_auction"    # 14:57-15:00 收盘集合竞价
 
 
+class EntryTiming(StrEnum):
+    """日线事件的入场/采样起点.
+
+    决定 ``event_start`` 当日以开盘还是收盘作为样本起点与三重屏障入场价。
+    采样器仍返回交易日；本枚举是挂在 Event 上的执行语义，不是另一套分钟网格。
+
+    默认（``to_event_dataframe``）为 ``OPEN``：起点=开盘，终点由三重屏障决定。
+    """
+
+    OPEN = "open"    # 当日开盘入场（默认；路径收益从开盘起算）
+    CLOSE = "close"  # 当日收盘决策/入场（路径收益从收盘起算）
+
+
 class ReportType(StrEnum):
     """财报披露类型 (§3.14)."""
 

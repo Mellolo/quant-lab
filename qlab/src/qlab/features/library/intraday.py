@@ -42,7 +42,7 @@ class IntradayVolSlope(IntradayDerivedFeature):
             name=f"intraday_vol_slope_{lookback_days}d",
             version="1.0",
             lookback_days=lookback_days,
-            available_at="next_open",  # 需要全日收盘后才能算
+            available_at="next_open",  # 需全日收盘后；开盘入场时会再对齐到次日
             requires_intraday=True,
             intraday_freq=freq,
             description="日内分钟方差对时间的回归斜率（衡量日内波动是否递增）",
@@ -85,7 +85,7 @@ class MorningReturn(IntradayDerivedFeature):
             name="morning_return",
             version="1.0",
             lookback_days=1,
-            available_at="today_close",  # 11:30 后就可算，今日收盘前可用
+            available_at="today_close",  # 11:30 后可知；开盘入场会对齐到次日
             requires_intraday=True,
             intraday_freq=freq,
             description="9:30-11:30 累计 log-return",

@@ -225,11 +225,18 @@ SCHEMA_EVENT = Schema(
         ColumnSpec("t1", "datetime64[ns]", description="垂直屏障时刻；NaT 表示无垂直屏障"),
         ColumnSpec("target", "float64", nullable=False, description="屏障宽度基准（如估计日波动率）"),
         ColumnSpec("side", "float64", description="主模型给的方向 +1/-1；None 表示让模型学方向"),
+        ColumnSpec(
+            "entry_timing",
+            "str",
+            description="样本起点/入场时点: 'open'(to_event_dataframe 默认) 或 'close'。"
+                        "列缺失时 label_events 视为 close，以兼容手写旧事件表",
+        ),
     ],
     invariants=[
         "target > 0",
         "t1 > event_start（若 t1 非 NaT）",
         "event_start 必须是交易时刻",
+        "entry_timing ∈ {open, close}（若列存在）",
     ],
 )
 
@@ -758,6 +765,15 @@ def _check_event_invariants(df: pd.DataFrame) -> None:
         bad_mask = df["t1"].notna() & (df["t1"] <= pd.Series(event_start, index=df.index))
         if bad_mask.any():
             errs.append(f"t1 <= event_start: {int(bad_mask.sum())} 行")
+
+    if "entry_timing" in df.columns:
+        ok = {"open", "close"}
+        vals = df["entry_timing"].dropna().astype(str)
+        bad = ~vals.isin(ok)
+        if bad.any():
+            errs.append(
+                f"entry_timing 非法(应 ∈ {{open, close}}): {int(bad.sum())} 行"
+            )
 
     if errs:
         raise SchemaViolationError(

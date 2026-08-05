@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 
 def _bet_size_sigmoid(w: float, x: float) -> float:
     """Sigmoid bet size: m = x / sqrt(w + x^2)."""
@@ -51,20 +53,23 @@ def limit_price(
     w: float,
     max_position: int,
 ) -> float:
-    """计算保本限价（从 current → target 的过程中不会实际亏损） — 书 Ch10 Snippet 10.4."""
-    if target_position == current_position:
-        return forecast_price
+    """计算保本限价（从 current → target 的过程中不会实际亏损） — 书 Ch10 Snippet 10.4.
 
-    sgn = 1 if target_position >= current_position else -1
+    返回各中间仓位反函数价格的**算术平均**:
+    ``sum(inv_price(j)) / |target - current|``。
+    目标与当前相同时返回 NaN（避免除零）。
+    """
+    if target_position == current_position:
+        return math.nan
+
+    delta = target_position - current_position
+    sgn = 1 if delta > 0 else -1
     lp = 0.0
-    count = 0
-    start = abs(current_position + sgn)
-    end = abs(target_position) + 1
-    if start >= end:
-        return forecast_price
-    for j in range(start, end):
-        lp += _inv_price_sigmoid(forecast_price, w, j / max_position)
-        count += 1
-    if count == 0:
-        return forecast_price
-    return lp / (target_position - current_position) * count
+    # 书 Snippet 10.4: range(abs(pos+sgn), abs(targetPos)+1)
+    for j in range(abs(current_position + sgn), abs(target_position) + 1):
+        m = j / float(max_position)
+        if abs(m) >= 1.0:
+            # |m|=1 时反函数奇异; 跳过边界点
+            continue
+        lp += _inv_price_sigmoid(forecast_price, w, m)
+    return lp / abs(delta)

@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 
 from qlab.core.calendar import Calendar, get_default_calendar
+from qlab.core.enums import EntryTiming
 from qlab.core.schema import SCHEMA_EVENT, validate_schema
 
 
@@ -265,7 +266,7 @@ class EntropySampler(EventSampler):
 
         for i in range(self.window, len(ret)):
             window_ret = ret.iloc[i - self.window : i].values
-            entropy = self._shannon_entropy(window_ret)
+            entropy = self._shannon_entropy(window_ret, self.n_bins)
             if prev_entropy is not None:
                 delta = abs(entropy - prev_entropy)
                 if delta >= self.h:
@@ -275,9 +276,12 @@ class EntropySampler(EventSampler):
         return pd.DatetimeIndex(events)
 
     @staticmethod
-    def _shannon_entropy(values: np.ndarray) -> float:
-        counts, _ = np.histogram(values, bins=10)
-        probs = counts / counts.sum()
+    def _shannon_entropy(values: np.ndarray, n_bins: int = 10) -> float:
+        counts, _ = np.histogram(values, bins=n_bins)
+        total = counts.sum()
+        if total <= 0:
+            return 0.0
+        probs = counts / total
         probs = probs[probs > 0]
         return -float(np.sum(probs * np.log2(probs)))
 
@@ -481,8 +485,9 @@ def to_event_dataframe(
     t1_days: int = 7,
     side: pd.Series | int | None = None,
     calendar: Calendar | None = None,
+    entry_timing: EntryTiming | str = EntryTiming.OPEN,
 ) -> pd.DataFrame:
-    """把 CUSUMFilter.sample_per_symbol 的 (timestamp, symbol) 对扩展为 Event schema.
+    """把采样器产出的 (timestamp, symbol) 对扩展为 Event schema.
 
     参数
     ----
@@ -491,14 +496,28 @@ def to_event_dataframe(
     t1_days : 垂直屏障的交易日数
     side : 主模型方向. None 表示不指定（让模型学方向）
     calendar : 交易日历
+    entry_timing : 样本起点 / 入场时点.
+
+        - ``open``(**默认**): ``event_start`` 日**开盘**入场；三重屏障从开盘价起算，
+          终点由屏障决定。标签路径仍用日线 close 盯市，
+          首日收益 = close_T / open_T - 1。
+        - ``close``: ``event_start`` 日**收盘**入场；三重屏障从收盘价起算。
+
+        注意: 若 pairs 来自**收盘** CUSUM，默认 ``open`` 会把当日收盘信息
+        泄漏进「开盘决策」。应用日频网格（:func:`daily_event_pairs`）、
+        把触发日平移到下一交易日开盘，或显式传 ``entry_timing='close'``。
 
     返回
     ----
-    符合 SCHEMA_EVENT 的 DataFrame: index=event_start, columns=[symbol, t1, target, side]
+    符合 SCHEMA_EVENT 的 DataFrame:
+    index=event_start, columns=[symbol, t1, target, side, entry_timing]
     """
+    timing = EntryTiming(entry_timing)
     cal = calendar or get_default_calendar()
     if pairs.empty:
-        out = pd.DataFrame(columns=["symbol", "t1", "target", "side"])
+        out = pd.DataFrame(
+            columns=["symbol", "t1", "target", "side", "entry_timing"]
+        )
         out.index.name = "event_start"
         return out
 
@@ -522,9 +541,31 @@ def to_event_dataframe(
         else:
             sd = float(side)
         rows.append({
-            "event_start": ts, "symbol": sym, "t1": t1, "target": tgt, "side": sd,
+            "event_start": ts,
+            "symbol": sym,
+            "t1": t1,
+            "target": tgt,
+            "side": sd,
+            "entry_timing": timing.value,
         })
 
     df = pd.DataFrame(rows).set_index("event_start").sort_index()
     validate_schema(df, SCHEMA_EVENT, strict_index=False)
     return df
+
+
+def daily_event_pairs(
+    symbols: list[str],
+    dates: pd.DatetimeIndex,
+) -> pd.DataFrame:
+    """日频均匀采样: 每个交易日 × 每个标的 一对 (timestamp, symbol).
+
+    与 CUSUM 等事件过滤器互补。接 ``to_event_dataframe`` 后默认
+    ``entry_timing=open``（起点开盘，终点由三重屏障决定）。
+    """
+    dates = pd.DatetimeIndex(dates).normalize().unique().sort_values()
+    syms = list(dict.fromkeys(symbols))
+    if len(dates) == 0 or not syms:
+        return pd.DataFrame(columns=["timestamp", "symbol"])
+    idx = pd.MultiIndex.from_product([dates, syms], names=["timestamp", "symbol"])
+    return idx.to_frame(index=False)

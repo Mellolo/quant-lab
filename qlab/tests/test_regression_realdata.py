@@ -103,6 +103,7 @@ class TestRegressionFeatures:
         [
             "mom_5d", "mom_20d", "mom_resid_20d", "ewm_vol_20d", "rv_20d",
             "turnover_5d", "vol_ratio_5d", "ma_20d", "log_close", "pe_ttm",
+            "auction_premium", "auction_vol_ratio",
         ],
     )
     def test_each_feature_computes(self, real_layer, real_universe, feature_name):
@@ -177,10 +178,14 @@ class TestRegressionLabeling:
     """标签层: 时间方向 + 采样器 + 并行等价 + meta-labeling."""
 
     def test_labels_are_forward_looking_only(self, real_labels):
-        """标签实现时刻必严格晚于事件时刻."""
+        """标签实现时刻不得早于事件日.
+
+        开盘入场时允许 touch_time == event_start（当日收盘触障），
+        日内顺序仍是 open → close，不算未来函数。
+        """
         starts = pd.DatetimeIndex(real_labels.index)
         touch = pd.to_datetime(real_labels["touch_time"])
-        assert (touch > starts).all(), "存在 touch_time <= event_start 的样本"
+        assert (touch >= starts).all(), "存在 touch_time < event_start 的样本"
 
     def test_label_bins_are_balanced_enough(self, real_labels):
         """三类标签都应出现(否则障碍参数或采样有问题)."""
@@ -434,10 +439,13 @@ class TestRegressionDownstream:
             n_paths += 1
             total_test += len(test)
             assert len(groups) == k
-            ts, te = X.index[test].min(), pd.DatetimeIndex(t1.iloc[test]).max()
             tr_start = pd.DatetimeIndex(X.index[train])
             tr_end = pd.DatetimeIndex(t1.iloc[train])
-            assert int(((tr_end >= ts) & (tr_start <= te)).sum()) == 0
+            for g in groups:
+                g_idx = cv.group_indices[g]
+                g_start = X.index[g_idx].min()
+                g_end = pd.DatetimeIndex(t1.iloc[g_idx]).max()
+                assert int(((tr_end >= g_start) & (tr_start <= g_end)).sum()) == 0
         assert n_paths == comb(N, k)
         assert abs(total_test / len(X) - k * comb(N, k) / N) < 0.1
 
@@ -587,12 +595,13 @@ class TestRegressionWideSample:
         ]
         events = to_event_dataframe(pairs, target=0.04, t1_days=15, calendar=cal)
         labels = label_events(
-            events, wide_daily[["close"]], TripleBarrier(pt=1.5, sl=1.0)
+            events, wide_daily[["open", "close"]], TripleBarrier(pt=1.5, sl=1.0)
         )
         assert len(labels) > 1000, f"宽样本应有千级标签, 实际 {len(labels)}"
         assert labels["ret"].notna().all(), "默认应剔除无有效收益的样本"
         tt = pd.to_datetime(labels["touch_time"])
-        assert (tt > pd.DatetimeIndex(labels.index)).all()
+        # 开盘入场允许当日收盘触障 → touch_time == event_start
+        assert (tt >= pd.DatetimeIndex(labels.index)).all()
         assert set(labels["bin"].unique()) >= {-1, 1}
 
     def test_weights_on_wide_sample(self, wide_daily):
@@ -610,7 +619,9 @@ class TestRegressionWideSample:
             & (pairs["timestamp"] <= pd.Timestamp(_WIDE_END))
         ]
         events = to_event_dataframe(pairs, target=0.05, t1_days=10, calendar=cal)
-        labels = label_events(events, wide_daily[["close"]], TripleBarrier(1.0, 1.0))
+        labels = label_events(
+            events, wide_daily[["open", "close"]], TripleBarrier(1.0, 1.0)
+        )
         w = sample_weights(labels, wide_daily[["close"]], time_decay=0.5)
         assert abs(w["final_weight"].sum() - len(w)) < 1e-6
         u = w["uniqueness"].dropna()
@@ -782,7 +793,9 @@ class TestRegressionResearchDiscipline:
                         pairs, target=0.05, t1_days=10, calendar=cal
                     )
                     lab = label_events(
-                        events, real_daily[["close"]], TripleBarrier(pt=pt, sl=sl)
+                        events,
+                        real_daily[["open", "close"]],
+                        TripleBarrier(pt=pt, sl=sl),
                     )
                     r = (
                         pd.Series(

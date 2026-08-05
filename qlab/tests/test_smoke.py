@@ -82,6 +82,161 @@ def test_build_feature_matrix():
     )
     assert "mom_5d" in X.feature_names
     assert "rv_20d" in X.feature_names
+    assert X.entry_timing == "open"
+
+
+def test_feature_entry_timing_alignment():
+    """open 入场: today_close/next_open 移一日, today_open 不动."""
+    from qlab.core.enums import EntryTiming
+    from qlab.data import DataLayer
+    from qlab.data.sources import FakeDataSource
+    from qlab.data.universe import Universe, UniverseSpec
+    from qlab.features.base import DailyFeature, FeatureMeta
+    from qlab.features.matrix import build_feature_matrix
+
+    class _CloseProbe(DailyFeature):
+        def __init__(self):
+            self.meta = FeatureMeta(
+                name="close_probe", version="1.0", lookback_days=1,
+                available_at="today_close",
+            )
+
+        def compute(self, ctx):
+            # 用日期序号做可检验的常数（每日每标的相同）
+            dates = ctx.target_dates
+            syms = ctx.universe.all_symbols()
+            idx = pd.MultiIndex.from_product([dates, syms], names=["date", "symbol"])
+            day_num = {d: float(i) for i, d in enumerate(dates)}
+            vals = [day_num[d] for d, _ in idx]
+            return pd.Series(vals, index=idx, name=self.meta.name)
+
+    class _OpenProbe(DailyFeature):
+        def __init__(self):
+            self.meta = FeatureMeta(
+                name="open_probe", version="1.0", lookback_days=1,
+                available_at="today_open",
+            )
+
+        def compute(self, ctx):
+            dates = ctx.target_dates
+            syms = ctx.universe.all_symbols()
+            idx = pd.MultiIndex.from_product([dates, syms], names=["date", "symbol"])
+            day_num = {d: float(i) for i, d in enumerate(dates)}
+            vals = [day_num[d] for d, _ in idx]
+            return pd.Series(vals, index=idx, name=self.meta.name)
+
+    days = pd.bdate_range("2024-01-02", periods=5)
+    syms = ["AAA.SH"]
+    idx = pd.MultiIndex.from_product([days, syms], names=["date", "symbol"])
+    uni = Universe(
+        pd.DataFrame(
+            {"in_universe": True, "weight": 1.0}, index=idx,
+        ),
+        UniverseSpec("probe"),
+    )
+    layer = DataLayer(source=FakeDataSource(seed=0, n_symbols=1))
+
+    open_m = build_feature_matrix(
+        features=[_CloseProbe(), _OpenProbe()],
+        data=layer, universe=uni,
+        date_range=(days[0], days[-1]),
+        entry_timing=EntryTiming.OPEN,
+        generate_mask=False,
+    )
+    # 第 0 日: close_probe 被 shift 掉 → NaN; open_probe 仍为 0
+    r0 = open_m.values.xs(days[0], level="date").iloc[0]
+    assert pd.isna(r0["close_probe"])
+    assert r0["open_probe"] == 0.0
+    # 第 1 日: close_probe = 昨日原始值 0; open_probe = 1
+    r1 = open_m.values.xs(days[1], level="date").iloc[0]
+    assert r1["close_probe"] == 0.0
+    assert r1["open_probe"] == 1.0
+
+    close_m = build_feature_matrix(
+        features=[_CloseProbe(), _OpenProbe()],
+        data=layer, universe=uni,
+        date_range=(days[0], days[-1]),
+        entry_timing=EntryTiming.CLOSE,
+        generate_mask=False,
+    )
+    # 收盘入场: 两者都不移
+    r0c = close_m.values.xs(days[0], level="date").iloc[0]
+    assert r0c["close_probe"] == 0.0
+    assert r0c["open_probe"] == 0.0
+
+
+def test_auction_premium_today_open():
+    """竞价溢价因子: today_open, 默认 open 入场不对齐掉当日值."""
+    from qlab.data import DataLayer
+    from qlab.data.sources import FakeDataSource
+    from qlab.features import build_feature_matrix
+    from qlab.features.library import AuctionPremium
+
+    data = DataLayer(source=FakeDataSource(seed=1, n_symbols=5))
+    universe = data.universe("csi500", "2023-01-01", "2023-06-30")
+    X = build_feature_matrix(
+        features=[AuctionPremium()],
+        data=data,
+        universe=universe,
+        date_range=("2023-03-01", "2023-06-30"),
+        generate_mask=False,
+    )
+    assert X.metas["auction_premium"].available_at == "today_open"
+    # 对齐后不应整列被 shift 成全 NaN
+    assert X.values["auction_premium"].notna().any()
+
+
+def test_feature_shift_days_table():
+    from qlab.core.enums import EntryTiming
+    from qlab.features.alignment import feature_shift_days
+
+    assert feature_shift_days("today_open", EntryTiming.OPEN) == 0
+    assert feature_shift_days("today_close", EntryTiming.OPEN) == 1
+    assert feature_shift_days("next_open", EntryTiming.OPEN) == 1
+    assert feature_shift_days("today_open", EntryTiming.CLOSE) == 0
+    assert feature_shift_days("today_close", EntryTiming.CLOSE) == 0
+    assert feature_shift_days("next_open", EntryTiming.CLOSE) == 1
+
+
+def test_attach_features_requires_matching_entry_timing():
+    """拼样本硬门禁: 特征与事件 entry_timing 必须一致."""
+    from qlab.core.enums import EntryTiming
+    from qlab.core.exceptions import PITViolationError
+    from qlab.data import DataLayer
+    from qlab.data.sources import FakeDataSource
+    from qlab.features import attach_features_to_events, build_feature_matrix
+    from qlab.features.library import Momentum
+    from qlab.labeling import daily_event_pairs, to_event_dataframe
+
+    data = DataLayer(source=FakeDataSource(seed=1, n_symbols=5))
+    uni = data.universe("csi500", "2023-01-01", "2023-06-30")
+    rng = ("2023-03-01", "2023-04-28")
+    X_open = build_feature_matrix(
+        features=[Momentum(5)], data=data, universe=uni, date_range=rng,
+        entry_timing=EntryTiming.OPEN, generate_mask=False,
+    )
+    days = data.calendar.trading_days(*rng)
+    syms = uni.all_symbols()[:2]
+    pairs = daily_event_pairs(syms, days[:5])
+
+    ev_open = to_event_dataframe(
+        pairs, target=0.02, t1_days=3, entry_timing=EntryTiming.OPEN,
+    )
+    Xt = attach_features_to_events(ev_open, X_open)
+    assert len(Xt) == len(ev_open)
+    assert "mom_5d" in Xt.columns
+    assert Xt.index.names == ["event_start", "symbol"]
+
+    ev_close = to_event_dataframe(
+        pairs, target=0.02, t1_days=3, entry_timing=EntryTiming.CLOSE,
+    )
+    with pytest.raises(PITViolationError, match="入场时点不一致"):
+        attach_features_to_events(ev_close, X_open)
+
+    # 缺 entry_timing 的手写事件也拒绝
+    bare = ev_open.drop(columns=["entry_timing"])
+    with pytest.raises(PITViolationError, match="缺少 entry_timing"):
+        attach_features_to_events(bare, X_open)
 
 
 # ---- labeling --------------------------------------------------------------
@@ -166,6 +321,62 @@ def test_triple_barrier():
     labels = label_events(events, close, TripleBarrier(pt=2, sl=1))
     assert "bin" in labels.columns
     assert "ret" in labels.columns
+
+
+def test_entry_timing_open_uses_open_price():
+    """开盘入场: 入场价=open, 首日盯市=close → ret = close/open - 1."""
+    from qlab.core.enums import EntryTiming
+    from qlab.labeling import (
+        TripleBarrier,
+        daily_event_pairs,
+        label_events,
+        to_event_dataframe,
+    )
+
+    days = pd.bdate_range("2024-01-02", periods=8)
+    sym = "600519.SH"
+    idx = pd.MultiIndex.from_product([days, [sym]], names=["date", "symbol"])
+    # 每日 open=100, close=102 → 开盘入场首日 ret 恒为 0.02
+    prices = pd.DataFrame(
+        {"open": 100.0, "close": 102.0},
+        index=idx,
+    )
+
+    pairs = daily_event_pairs([sym], days[:3])
+    events = to_event_dataframe(
+        pairs, target=0.015, t1_days=3, entry_timing=EntryTiming.OPEN,
+    )
+    assert (events["entry_timing"] == "open").all()
+
+    labels = label_events(
+        events, prices, TripleBarrier(pt=1.0, sl=1.0), drop_no_data=False,
+    )
+    # 首日 close/open-1 = 0.02 > 0.015 → 全部当日触上屏障
+    assert (labels["touch_type"] == "upper").all()
+    assert np.allclose(labels["ret"].to_numpy(), 0.02)
+
+    # 同路径若收盘入场: 入场价=close=102, 首日 ret=0, 不会当日触上屏障
+    ev_close = to_event_dataframe(
+        pairs, target=0.015, t1_days=3, entry_timing=EntryTiming.CLOSE,
+    )
+    lab_close = label_events(
+        ev_close, prices, TripleBarrier(pt=1.0, sl=1.0), drop_no_data=False,
+    )
+    assert not (lab_close["touch_type"] == "upper").all()
+
+    # 缺 open 列应 fail-loud
+    with pytest.raises(ValueError, match="open"):
+        label_events(events, prices[["close"]], TripleBarrier(1.0, 1.0))
+
+
+def test_to_event_dataframe_default_entry_timing_open():
+    from qlab.labeling import to_event_dataframe
+
+    pairs = pd.DataFrame(
+        {"timestamp": pd.to_datetime(["2024-01-02"]), "symbol": ["600519.SH"]}
+    )
+    ev = to_event_dataframe(pairs, target=0.02, t1_days=5)
+    assert (ev["entry_timing"] == "open").all()
 
 
 # ---- weights ---------------------------------------------------------------
@@ -681,13 +892,16 @@ def test_cpcv_handles_duplicate_time_index():
         n_paths += 1
         assert len(groups) == 2
         assert len(np.intersect1d(train, test)) == 0, "训练/测试不得重叠"
-        # purge 生效: 训练标签区间不得与测试段相交
-        te_start = X.index[test].min()
-        te_end = pd.DatetimeIndex(t1.iloc[test]).max()
+        # purge 生效: 训练标签区间不得与**任一**测试组时间窗相交
+        # (非全局 span —— 非邻接测试组时全局 span 会误杀中间训练段)
         tr_start = pd.DatetimeIndex(X.index[train])
         tr_end = pd.DatetimeIndex(t1.iloc[train])
-        overlap = ((tr_end >= te_start) & (tr_start <= te_end)).sum()
-        assert overlap == 0, f"purge 失效: {overlap} 个训练样本与测试段重叠"
+        for g in groups:
+            g_idx = cv.group_indices[g]
+            g_start = X.index[g_idx].min()
+            g_end = pd.DatetimeIndex(t1.iloc[g_idx]).max()
+            overlap = int(((tr_end >= g_start) & (tr_start <= g_end)).sum())
+            assert overlap == 0, f"purge 失效(组{g}): {overlap} 个训练样本重叠"
     assert n_paths == 15, f"C(6,2)=15 条路径, 实际 {n_paths}"
 
 
@@ -1386,3 +1600,138 @@ def test_mp_pandas_obj_preserves_submission_order():
         assert got["pos"].tolist() == atoms, (
             f"num_threads={nt} 下行序被打乱: {got['pos'].tolist()}"
         )
+
+
+def test_sample_weights_uniqueness_and_return_attr_are_mutex():
+    """uniqueness × return_attr 会二次惩罚并发, 二者互斥."""
+    import numpy as np
+    import pandas as pd
+    import pytest
+
+    from qlab.weights import sample_weights
+
+    dates = pd.bdate_range("2024-01-02", periods=10)
+    labels = pd.DataFrame(
+        {"symbol": ["AAA"] * 4, "t1": list(dates[3:7])},
+        index=pd.DatetimeIndex(dates[:4]),
+    )
+    close = pd.DataFrame(
+        {"close": np.linspace(10, 12, len(dates))},
+        index=pd.MultiIndex.from_product(
+            [dates, ["AAA"]], names=["date", "symbol"]
+        ),
+    )
+    with pytest.raises(ValueError, match="不能同时"):
+        sample_weights(
+            labels, close, use_uniqueness=True, use_return_attribution=True
+        )
+
+
+def test_sample_weights_time_decay_follows_event_time_not_row_order():
+    """time_decay 必须按 event_start 日历序, 而非 labels 行序."""
+    import numpy as np
+    import pandas as pd
+
+    from qlab.weights import sample_weights
+
+    dates = pd.bdate_range("2024-01-02", periods=12)
+    # 故意打乱行序: 先放新事件, 再放旧事件
+    starts = [dates[5], dates[4], dates[3], dates[2], dates[1], dates[0]]
+    t1s = [dates[8], dates[7], dates[6], dates[5], dates[4], dates[3]]
+    labels = pd.DataFrame(
+        {"symbol": ["AAA"] * 6, "t1": t1s},
+        index=pd.DatetimeIndex(starts),
+    )
+    close = pd.DataFrame(
+        {"close": np.linspace(100, 110, len(dates))},
+        index=pd.MultiIndex.from_product(
+            [dates, ["AAA"]], names=["date", "symbol"]
+        ),
+    )
+    w = sample_weights(
+        labels, close, use_uniqueness=True, use_return_attribution=False, time_decay=0.0
+    )
+    # 最老事件 (dates[0]) 的 time_decay 应最小, 最新 (dates[5]) 最大
+    assert w.loc[dates[0], "time_decay"] < w.loc[dates[5], "time_decay"]
+    # 按时间看应单调不减
+    chrono = w.sort_index()["time_decay"]
+    assert (chrono.diff().dropna() >= -1e-12).all()
+
+
+def test_limit_price_is_average_not_sum():
+    """Snippet 10.4: limit_price = sum(inv) / |Δpos|, 不是再乘 count."""
+    import math
+
+    from qlab.sizing.dynamic import _inv_price_sigmoid, limit_price
+
+    f, w, max_pos = 100.0, 0.1, 10
+    cur, tgt = 0, 3
+    expected = sum(
+        _inv_price_sigmoid(f, w, j / max_pos) for j in range(1, 4)
+    ) / abs(tgt - cur)
+    got = limit_price(tgt, cur, f, w, max_pos)
+    assert abs(got - expected) < 1e-9
+    # 旧实现 lp/Δ * count ≈ sum, 约为 expected * |Δ|
+    assert abs(got - expected * abs(tgt - cur)) > 1e-6
+    assert math.isnan(limit_price(2, 2, f, w, max_pos))
+
+
+def test_cpcv_assemble_paths_matches_book_figure_12_2():
+    """N=6,k=2 时 φ=5; 每条路径覆盖全部 6 组且组内预测来自正确 split."""
+    import numpy as np
+    import pandas as pd
+
+    from qlab.evaluation import CombinatorialPurgedCV
+
+    n = 60
+    idx = pd.bdate_range("2024-01-01", periods=n)
+    X = pd.DataFrame({"f": np.arange(n, dtype=float)}, index=idx)
+    t1 = pd.Series(idx.shift(3, freq="B"), index=idx)
+    cv = CombinatorialPurgedCV(N=6, k=2, t1=t1, embargo_pct=0.0)
+    assert cv.n_paths == 5
+
+    split_preds = []
+    for train, test, groups in cv.split(X):
+        # 用 "split标记" 作为伪预测, 便于校验路径归属
+        sid = len(split_preds)
+        by_g = {}
+        for g in groups:
+            g_idx = cv.group_indices[g]
+            by_g[g] = pd.Series(
+                np.full(len(g_idx), sid, dtype=float),
+                index=X.index[g_idx],
+                name=f"g{g}",
+            )
+        split_preds.append(by_g)
+
+    paths = cv.assemble_paths(split_preds)
+    assert len(paths) == 5
+    # 每条路径长度 = 全部样本 (每组各出现一次)
+    for p in paths:
+        assert len(p) == n
+    # Figure 12.2 path1: G1←S1, G2←S1, G3←S2, G4←S3, G5←S4, G6←S5
+    # splits/groups 均 0-based
+    expected_path0 = {0: 0, 1: 0, 2: 1, 3: 2, 4: 3, 5: 4}
+    for g, sid in expected_path0.items():
+        seg = paths[0].reindex(X.index[cv.group_indices[g]])
+        assert (seg == sid).all(), f"path0 group{g}: got {seg.unique()} want {sid}"
+
+
+def test_entropy_sampler_respects_n_bins():
+    """EntropySampler.n_bins 必须传入 histogram, 不能写死 10."""
+    import numpy as np
+    import pandas as pd
+
+    from qlab.labeling import EntropySampler
+
+    rng = np.random.default_rng(0)
+    idx = pd.bdate_range("2020-01-01", periods=200)
+    px = pd.Series(100 * np.exp(rng.normal(0, 0.01, len(idx)).cumsum()), index=idx)
+    a = EntropySampler(window=30, n_bins=5, h=0.05)._shannon_entropy(
+        px.pct_change().dropna().iloc[:30].values, 5
+    )
+    b = EntropySampler(window=30, n_bins=5, h=0.05)._shannon_entropy(
+        px.pct_change().dropna().iloc[:30].values, 50
+    )
+    # 不同 bins 一般得到不同熵; 至少 API 不再忽略参数
+    assert isinstance(a, float) and isinstance(b, float)

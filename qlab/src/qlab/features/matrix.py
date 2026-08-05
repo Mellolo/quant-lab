@@ -13,9 +13,11 @@ from dataclasses import dataclass, field
 import pandas as pd
 
 from qlab.core.calendar import Calendar, get_default_calendar
+from qlab.core.enums import EntryTiming
 from qlab.core.exceptions import FeatureComputationError
 from qlab.data.layer import DataLayer
 from qlab.data.universe import Universe, UniverseSpec
+from qlab.features.alignment import align_features_for_entry
 from qlab.features.base import Feature, FeatureMeta, FeatureValueMeta
 from qlab.features.context import FeatureContext
 from qlab.features.registry import registry
@@ -24,10 +26,15 @@ from qlab.features.store import FeatureStore, InMemoryFeatureStore, make_feature
 
 @dataclass
 class FeatureMatrix:
-    """已构建的特征矩阵."""
+    """已构建的特征矩阵.
+
+    **契约**: ``values`` 第 T 行 = 在 ``entry_timing`` 决策之前可知的因子值。
+    拼到样本上时请用 :func:`~qlab.features.alignment.attach_features_to_events`，
+    勿直接 ``reindex`` 绕过入场时点校验。
+    """
 
     values: pd.DataFrame
-    """MultiIndex(date, symbol) × feature columns."""
+    """MultiIndex(date, symbol) × feature columns（已按 entry_timing 对齐）."""
 
     metas: dict[str, FeatureMeta]
     """每列的元数据."""
@@ -37,6 +44,9 @@ class FeatureMatrix:
 
     value_metas: dict[str, FeatureValueMeta] = field(default_factory=dict)
     """每列的计算审计元数据（feature_value 级别）."""
+
+    entry_timing: EntryTiming = EntryTiming.OPEN
+    """本矩阵的 as-of 入场时点；必须与 Event.entry_timing 一致才能拼接."""
 
     @property
     def feature_names(self) -> list[str]:
@@ -56,6 +66,7 @@ class FeatureMatrix:
     def __repr__(self) -> str:
         return (f"<FeatureMatrix shape={self.values.shape} "
                 f"features={len(self.feature_names)} "
+                f"entry={self.entry_timing.value} "
                 f"mask={'on' if self.mask is not None else 'off'}>")
 
 
@@ -106,9 +117,9 @@ def _topological_sort(features: Sequence[Feature]) -> list[Feature]:
 
 def _compute_pipeline_hash(
     metas: list[FeatureMeta], dataset_id: str, universe_id: str,
-    date_range: tuple, data_version: str,
+    date_range: tuple, data_version: str, entry_timing: str,
 ) -> str:
-    """整条特征流水线的哈希——含全部 feature (name,version) + 数据上下文."""
+    """整条特征流水线的哈希——含全部 feature (name,version) + 数据上下文 + 入场对齐."""
     spec = {
         "features": sorted([(m.name, m.version) for m in metas]),
         "dataset_id": dataset_id,
@@ -116,6 +127,7 @@ def _compute_pipeline_hash(
         "start": str(date_range[0])[:10],
         "end": str(date_range[1])[:10],
         "data_version": data_version,
+        "entry_timing": entry_timing,
     }
     return hashlib.sha1(json.dumps(spec, sort_keys=True).encode()).hexdigest()[:16]
 
@@ -164,6 +176,7 @@ def build_feature_matrix(
     mode: str = "batch",
     dataset_id: str = "default",
     generate_mask: bool = True,
+    entry_timing: EntryTiming | str = EntryTiming.OPEN,
 ) -> FeatureMatrix:
     """构建 FeatureMatrix.
 
@@ -179,7 +192,19 @@ def build_feature_matrix(
     dataset_id : 数据集标识（影响缓存键）
     generate_mask : 是否生成 mask DataFrame 标记不可信单元（涨跌停、停牌）.
                     默认 True. 设为 False 在没有 DataSource 状态字段时使用.
+    entry_timing : 样本入场时点，决定按 ``available_at`` 如何 shift。
+
+        默认 ``open``（与 ``to_event_dataframe`` 一致）。对齐后矩阵满足：
+
+        **第 T 行的所有因子值，在 T 的该入场时点之前均已可知。**
+
+        - ``today_open`` → 留在 T（竞价等）
+        - ``today_close`` / ``next_open`` → shift 到 T+1 行
+
+        接到样本时用 ``attach_features_to_events(events, matrix)``，
+        它会强制 ``events.entry_timing == matrix.entry_timing``。
     """
+    timing = EntryTiming(entry_timing)
     calendar = calendar or get_default_calendar()
     feature_store = feature_store or InMemoryFeatureStore()
 
@@ -224,15 +249,17 @@ def build_feature_matrix(
             metas=empty_metas,
             mask=None,
             value_metas={},
+            entry_timing=timing,
         )
 
     # 流水线哈希（用 ordered 的全部 meta 一起算，便于审计）
     data_version = getattr(data.source, "source_version", "unknown")
     pipeline_hash = _compute_pipeline_hash(
-        [f.meta for f in ordered], dataset_id, uni.name, (start, end), data_version,
+        [f.meta for f in ordered], dataset_id, uni.name, (start, end),
+        data_version, timing.value,
     )
 
-    # 5. 依次计算
+    # 5. 依次计算（缓存存**未按入场对齐**的原始值；对齐在步骤 7）
     computed: dict[str, pd.Series] = {}
     metas: dict[str, FeatureMeta] = {}
     value_metas: dict[str, FeatureValueMeta] = {}
@@ -291,11 +318,8 @@ def build_feature_matrix(
     )
     df = df.reindex(universe_idx)
 
-    # 应用 available_at 的 shift（让 'next_open' 类特征往后移一天）
-    for name, meta in metas.items():
-        if meta.available_at == "next_open":
-            # 在每个 symbol 维度上 shift 一天
-            df[name] = df.groupby(level="symbol")[name].shift(1)
+    # 7. 按 entry_timing × available_at 做 PIT 对齐
+    df = align_features_for_entry(df, metas, timing)
 
     mask = None
     if generate_mask:
@@ -305,4 +329,7 @@ def build_feature_matrix(
             # 状态字段缺失等情况下不致命——降级为不生成 mask
             mask = None
 
-    return FeatureMatrix(values=df, metas=metas, mask=mask, value_metas=value_metas)
+    return FeatureMatrix(
+        values=df, metas=metas, mask=mask, value_metas=value_metas,
+        entry_timing=timing,
+    )

@@ -553,7 +553,7 @@ meta-labeling 模式（`Event.side` 已定）：
 | `uniqueness` | float64 | 平均唯一性（书中 $\bar u_i$），∈ [0, 1] |
 | `return_attr` | float64 | 按收益归因的权重（书中 $\tilde w_i$） |
 | `time_decay` | float64 | 时间衰减因子，∈ [0, 1] |
-| `final_weight` | float64 | 最终权重 = uniqueness × return_attr × time_decay（或其他组合方式） |
+| `final_weight` | float64 | 最终权重 = (uniqueness **或** return_attr) × time_decay；二者互斥（return attribution 已含 `/c_t`） |
 
 **不变量**：
 

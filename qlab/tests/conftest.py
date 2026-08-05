@@ -90,7 +90,7 @@ def real_labels(real_daily, real_close_wide):
     ]
     events = to_event_dataframe(pairs, target=0.04, t1_days=10, calendar=cal)
     labels = label_events(
-        events, real_daily[["close"]], TripleBarrier(pt=1.5, sl=1.0)
+        events, real_daily[["open", "close"]], TripleBarrier(pt=1.5, sl=1.0)
     )
     labels["t1"] = pd.to_datetime(labels["touch_time"])
     return labels

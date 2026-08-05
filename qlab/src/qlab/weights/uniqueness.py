@@ -98,7 +98,7 @@ def sample_weights(
     labels: pd.DataFrame,
     close: pd.DataFrame,
     *,
-    use_return_attribution: bool = True,
+    use_return_attribution: bool = False,
     use_uniqueness: bool = True,
     time_decay: float | None = None,
     normalize_sum_to_n: bool = True,
@@ -109,9 +109,12 @@ def sample_weights(
     ----
     labels : 含 t1 列的 DataFrame (index=event_start)
     close : MultiIndex(date, symbol) 的价格 DataFrame
-    use_return_attribution : 是否按收益归因
-    use_uniqueness : 是否按唯一性
-    time_decay : 时间衰减参数（与 time_decay_factors 一致；None 表示不衰减）
+    use_return_attribution : 是否按收益归因（书 §4.6）。与 uniqueness
+        **互斥** —— return attribution 已内含 ``/ c_t``, 再乘 uniqueness
+        会二次惩罚并发（书/mlfinlab 亦分开使用）。
+    use_uniqueness : 是否按平均唯一性（书 §4.4）。默认 True。
+    time_decay : 时间衰减参数（与 time_decay_factors 一致；None 表示不衰减）。
+        衰减施加在唯一性（或全 1 占位）的**时间序**累计上。
     normalize_sum_to_n : 是否把 final_weight 归一到总和 = N
 
     返回
@@ -119,6 +122,18 @@ def sample_weights(
     DataFrame, index=event_start, 列 [uniqueness, return_attr, time_decay, final_weight]
     """
     from qlab.weights.time_decay import time_decay_factors
+
+    if use_uniqueness and use_return_attribution:
+        raise ValueError(
+            "use_uniqueness 与 use_return_attribution 不能同时为 True。\n"
+            "  原因: return attribution 已按并发数 c_t 加权, 再乘 uniqueness\n"
+            "  会二次惩罚重叠样本(书 Ch4 将二者作为替代方案, 非乘积)。\n"
+            "  选其一: uniqueness(默认) 或 return_attribution。"
+        )
+    if not use_uniqueness and not use_return_attribution:
+        raise ValueError(
+            "use_uniqueness 与 use_return_attribution 至少启用一个。"
+        )
 
     out = pd.DataFrame(index=labels.index)
 
@@ -180,26 +195,36 @@ def sample_weights(
         res.index = labels.index
         return res
 
-    out["uniqueness"] = _scatter(uniq_parts) if uniq_parts else 1.0
-    out["return_attr"] = _scatter(attr_parts) if attr_parts else 1.0
+    out["uniqueness"] = (
+        _scatter(uniq_parts) if uniq_parts else pd.Series(1.0, index=labels.index)
+    )
+    out["return_attr"] = (
+        _scatter(attr_parts) if attr_parts else pd.Series(1.0, index=labels.index)
+    )
 
-    # 时间衰减
-    if time_decay is not None and use_uniqueness:
-        # 按 event_start 时间顺序累加 uniqueness
-        # (多 symbol 时 index 有重复, 故先降为位置序列)
-        sorted_u = out["uniqueness"].reset_index(drop=True).sort_index()
-        decay = time_decay_factors(sorted_u, clf_last_w=time_decay)
-        # 按位置回填到原 index（保持 labels.index 顺序）
-        out["time_decay"] = decay.values
+    # 时间衰减: 按 event_start **日历序**累加 uniqueness(或全 1), 再映回原行序。
+    # 多 symbol 时 index 有重复, 用稳定排序按 (timestamp, 原位置) 排。
+    if time_decay is not None:
+        base = (
+            out["uniqueness"].fillna(1.0).to_numpy(dtype="float64")
+            if use_uniqueness
+            else np.ones(len(labels), dtype="float64")
+        )
+        event_times = pd.DatetimeIndex(pd.to_datetime(pd.Series(labels.index))).asi8
+        order = np.argsort(event_times, kind="mergesort")
+        base_sorted = pd.Series(base[order])  # RangeIndex, 已是时间序
+        decay_sorted = time_decay_factors(base_sorted, clf_last_w=time_decay)
+        decay = np.empty(len(labels), dtype="float64")
+        decay[order] = decay_sorted.to_numpy(dtype="float64")
+        out["time_decay"] = decay
     else:
         out["time_decay"] = 1.0
 
-    # 合成最终权重
-    final = (
-        out["uniqueness"].fillna(1.0)
-        * out["return_attr"].fillna(1.0)
-        * out["time_decay"].fillna(1.0)
-    )
+    # 合成最终权重: uniqueness **或** return_attr(互斥), 再乘 time_decay
+    if use_uniqueness:
+        final = out["uniqueness"].fillna(1.0) * out["time_decay"].fillna(1.0)
+    else:
+        final = out["return_attr"].fillna(1.0) * out["time_decay"].fillna(1.0)
 
     if normalize_sum_to_n and final.sum() > 0:
         n = len(final)

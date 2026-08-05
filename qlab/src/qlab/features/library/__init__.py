@@ -11,6 +11,7 @@
 
 # 触发各模块的注册副作用
 from qlab.features.library import (  # noqa: F401
+    auction,
     fundamental,
     intraday,
     momentum,
@@ -18,6 +19,7 @@ from qlab.features.library import (  # noqa: F401
     volatility,
     volume,
 )
+from qlab.features.library.auction import AuctionPremium, AuctionVolumeRatio
 from qlab.features.library.fundamental import PB, PE_TTM
 from qlab.features.library.intraday import IntradayVolSlope, MorningReturn
 from qlab.features.library.momentum import Momentum, MomentumResidual
@@ -38,4 +40,6 @@ __all__ = [
     "PE_TTM", "PB",
     # intraday
     "IntradayVolSlope", "MorningReturn",
+    # auction (today_open)
+    "AuctionPremium", "AuctionVolumeRatio",
 ]
