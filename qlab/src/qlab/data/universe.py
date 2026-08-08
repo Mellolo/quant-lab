@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import numpy as np
 import pandas as pd
 
 from qlab.core.exceptions import UniverseError
@@ -107,8 +108,68 @@ class Universe:
         """返回完整 DataFrame 副本（不希望被修改）."""
         return self._df.copy()
 
+    def intersect(self, mask: pd.Series, *, name_suffix: str = "") -> Universe:
+        """与 bool mask 求交，得到更小的 Universe.
+
+        参数
+        ----
+        mask : MultiIndex(date, symbol) 的 bool Series；True = 保留。
+        name_suffix : 追加到 spec.name（便于审计），如 ``'|amt20d'``。
+        """
+        if not isinstance(mask.index, pd.MultiIndex):
+            raise UniverseError("mask 必须是 MultiIndex(date, symbol)")
+        m = mask.reindex(self._df.index).fillna(False).astype(bool)
+        keep = self._df["in_universe"].astype(bool) & m
+        out = self._df.copy()
+        out["in_universe"] = keep
+        # 权重：剔出的置 NaN，在池内重新归一（若原权重可用）
+        if "weight" in out.columns:
+            w = out["weight"].where(keep)
+            sums = w.groupby(level="date").transform("sum")
+            out["weight"] = w / sums.replace(0, np.nan)
+        suffix = name_suffix or "|filtered"
+        new_spec = UniverseSpec(f"{self._spec.name}{suffix}")
+        return Universe(out, new_spec)
+
     def __repr__(self) -> str:
         start, end = self.date_range()
         n_symbols = len(self.all_symbols())
         return (f"Universe(spec={self._spec.name}, "
                 f"dates={start.date()}~{end.date()}, n_symbols={n_symbols})")
+
+
+def filter_by_dollar_volume(
+    universe: Universe,
+    daily: pd.DataFrame,
+    *,
+    min_avg_amount: float = 5.0e7,
+    lookback_days: int = 20,
+) -> Universe:
+    """成交额宇宙过滤 — trading-books 07/12 流动性门槛.
+
+    保留滚动 ``lookback_days`` 日均成交额（``amount``，元）≥ ``min_avg_amount``
+    的 (date, symbol)。默认 20 日均额 ≥ 5e7（约 5000 万）。
+
+    使用截至当日的 amount（``today_close`` 语义）。开盘入场时请用
+    T 日过滤结果服务 T+1 开盘，或先对 mask ``groupby(symbol).shift(1)``。
+
+    参数
+    ----
+    universe : 基础宇宙
+    daily : DailyBar（至少含 ``amount``），index=(date, symbol)
+    min_avg_amount : 日均成交额下限（元）
+    lookback_days : 滚动窗口
+    """
+    if "amount" not in daily.columns:
+        raise UniverseError("filter_by_dollar_volume 需要 daily 含 amount 列")
+    if lookback_days < 1:
+        raise ValueError("lookback_days 必须 >= 1")
+
+    amt = daily["amount"].astype("float64").unstack("symbol")
+    avg = amt.rolling(lookback_days, min_periods=max(1, lookback_days // 2)).mean()
+    mask = (avg >= float(min_avg_amount)).stack(future_stack=True)
+    mask.index.names = ["date", "symbol"]
+    return universe.intersect(
+        mask,
+        name_suffix=f"|amt{lookback_days}d>={min_avg_amount:.0e}",
+    )

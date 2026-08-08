@@ -58,3 +58,55 @@ class MomentumResidual(DailyFeature):
 
 
 registry.register(instance=MomentumResidual(20))
+
+
+class SmoothMomentum(DailyFeature):
+    """平滑动量（Clenow）: 年化 log 价格斜率 × R².
+
+    对过去 ``window`` 日的 ln(close) 做线性回归，得分 =
+    ``(exp(slope × 252) - 1) × R²``。惩罚靠尖峰堆出的假动量。
+    """
+
+    def __init__(self, window: int = 90):
+        if window < 5:
+            raise ValueError("window 必须 >= 5")
+        self.window = window
+        self.meta = FeatureMeta(
+            name=f"smooth_mom_{window}d",
+            version="1.0",
+            lookback_days=window,
+            available_at="today_close",
+            description=f"过去 {window} 日 ln(price) 回归年化斜率 × R²（Clenow）",
+        )
+
+    def compute(self, ctx: FeatureContext) -> pd.Series:
+        close = ctx.daily(["close"], lookback_days=self.window)["close"].unstack(
+            "symbol"
+        )
+        log_c = np.log(close)
+        w = self.window
+        x = np.arange(w, dtype=float)
+        x = x - x.mean()
+        ss_x = float((x ** 2).sum())
+
+        def _score(y: np.ndarray) -> float:
+            if y.shape[0] != w or np.isnan(y).any():
+                return np.nan
+            y = y.astype(float)
+            y0 = y - y.mean()
+            slope = float((x * y0).sum() / ss_x)
+            yhat = slope * x + y.mean()
+            ss_res = float(((y - yhat) ** 2).sum())
+            ss_tot = float((y0 ** 2).sum())
+            if ss_tot <= 0:
+                return 0.0
+            r2 = 1.0 - ss_res / ss_tot
+            annualized = float(np.exp(slope * 252.0) - 1.0)
+            return annualized * max(r2, 0.0)
+
+        out = log_c.rolling(w).apply(_score, raw=True)
+        return out.stack(future_stack=True).rename(self.meta.name)
+
+
+registry.register(instance=SmoothMomentum(90))
+registry.register(instance=SmoothMomentum(60))

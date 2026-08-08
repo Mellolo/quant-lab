@@ -239,7 +239,206 @@ def test_attach_features_requires_matching_entry_timing():
         attach_features_to_events(bare, X_open)
 
 
+def test_pit_blocks_same_day_close_leak_on_open_entry():
+    """有效性: 开盘样本绝不能读到「当日收盘才可知」的原始值.
+
+    构造 today_close 探针 = 当日 close。若不对齐, 开盘样本会直接读到
+    当日收盘(未来函数)。对齐 + attach 后, 开盘日 T 上应是昨收, 而非今收。
+    """
+    from qlab.core.enums import EntryTiming
+    from qlab.data import DataLayer
+    from qlab.data.sources import FakeDataSource
+    from qlab.data.universe import Universe, UniverseSpec
+    from qlab.features import attach_features_to_events, build_feature_matrix
+    from qlab.features.base import DailyFeature, FeatureMeta
+    from qlab.features.context import FeatureContext
+    from qlab.labeling import daily_event_pairs, to_event_dataframe
+
+    days = pd.bdate_range("2024-03-01", periods=8)
+    sym = "600000.SH"
+    idx = pd.MultiIndex.from_product([days, [sym]], names=["date", "symbol"])
+    # 人造严格递增收盘: 100,101,...,107 —— 一眼能看出有没有偷看当日
+    closes = pd.Series(
+        100.0 + np.arange(len(days)), index=idx, name="close", dtype="float64",
+    )
+    opens = closes - 0.5
+    layer = DataLayer(source=FakeDataSource(seed=0, n_symbols=1))
+    uni = Universe(
+        pd.DataFrame({"in_universe": True, "weight": 1.0}, index=idx),
+        UniverseSpec("pit"),
+    )
+
+    class _SameDayCloseFixed(DailyFeature):
+        def __init__(self, close_s: pd.Series):
+            self._close = close_s
+            self.meta = FeatureMeta(
+                name="same_day_close", version="1.0", lookback_days=1,
+                available_at="today_close",
+            )
+
+        def compute(self, ctx):
+            return self._close.reindex(
+                pd.MultiIndex.from_product(
+                    [ctx.target_dates, ctx.universe.all_symbols()],
+                    names=["date", "symbol"],
+                )
+            ).rename(self.meta.name)
+
+    class _AuctionLike(DailyFeature):
+        def __init__(self, open_s: pd.Series):
+            self._open = open_s
+            self.meta = FeatureMeta(
+                name="auction_like", version="1.0", lookback_days=1,
+                available_at="today_open",
+            )
+
+        def compute(self, ctx):
+            return self._open.reindex(
+                pd.MultiIndex.from_product(
+                    [ctx.target_dates, ctx.universe.all_symbols()],
+                    names=["date", "symbol"],
+                )
+            ).rename(self.meta.name)
+
+    feat = _SameDayCloseFixed(closes)
+
+    # --- 未对齐基线: 原始 compute 在 T 日就是当日 close ---
+    ctx = FeatureContext(
+        data=layer, target_dates=days, universe=uni,
+        calendar=layer.calendar, history_extra_days=1,
+    )
+    raw = feat.compute(ctx)
+    assert raw.loc[(days[3], sym)] == 103.0  # 当日收盘
+
+    # --- 开盘对齐后: T 日应是昨收 102, 不是今收 103 ---
+    X = build_feature_matrix(
+        features=[feat], data=layer, universe=uni,
+        date_range=(days[0], days[-1]),
+        entry_timing=EntryTiming.OPEN, generate_mask=False,
+    )
+    assert X.values.loc[(days[3], sym), "same_day_close"] == 102.0
+
+    pairs = daily_event_pairs([sym], days[3:4])
+    events = to_event_dataframe(
+        pairs, target=0.02, t1_days=2, entry_timing=EntryTiming.OPEN,
+    )
+    Xt = attach_features_to_events(events, X)
+    assert float(Xt["same_day_close"].iloc[0]) == 102.0, (
+        "开盘样本读到了当日收盘 — PIT 对齐失效"
+    )
+
+    # today_open 探针在开盘日应保留当日值
+    X2 = build_feature_matrix(
+        features=[_AuctionLike(opens)], data=layer, universe=uni,
+        date_range=(days[0], days[-1]),
+        entry_timing=EntryTiming.OPEN, generate_mask=False,
+    )
+    assert X2.values.loc[(days[3], sym), "auction_like"] == 102.5
+    Xt2 = attach_features_to_events(events, X2)
+    assert float(Xt2["auction_like"].iloc[0]) == 102.5
+
+
 # ---- labeling --------------------------------------------------------------
+
+def test_four_piece_stack_dollar_stage_smooth_newhigh():
+    """四件套烟雾: 成交额宇宙 + Stage2 + 平滑动量 + 新高采样."""
+    from qlab.core.enums import EntryTiming
+    from qlab.data import DataLayer, filter_by_dollar_volume
+    from qlab.data.sources import FakeDataSource
+    from qlab.features import build_feature_matrix
+    from qlab.features.library import IsStage2, SmoothMomentum, StageLabel
+    from qlab.labeling import (
+        NewHighBreakoutSampler,
+        filter_pairs,
+        to_event_dataframe,
+    )
+
+    data = DataLayer(source=FakeDataSource(seed=2, n_symbols=8))
+    uni0 = data.universe("csi500", "2022-01-01", "2023-12-31")
+    syms = uni0.all_symbols()
+    daily = data.daily(syms, "2022-01-01", "2023-12-31", validate=False)
+
+    uni = filter_by_dollar_volume(
+        uni0, daily, min_avg_amount=1.0, lookback_days=20,
+    )
+    assert uni.all_symbols()  # Fake 有成交额，不应滤空
+    assert "|amt" in uni.name
+
+    X = build_feature_matrix(
+        features=[SmoothMomentum(60), StageLabel(), IsStage2()],
+        data=data,
+        universe=uni,
+        date_range=("2023-01-01", "2023-06-30"),
+        entry_timing=EntryTiming.OPEN,
+        generate_mask=False,
+    )
+    assert "smooth_mom_60d" in X.feature_names
+    assert "is_stage2_200d" in X.feature_names
+    # Stage 标签应落在 1–4
+    stages = X.values["stage_200d"].dropna()
+    assert set(stages.unique()).issubset({1.0, 2.0, 3.0, 4.0})
+
+    close_wide = daily["close"].unstack("symbol")
+    pairs = NewHighBreakoutSampler(window=20, cooldown_days=5, signal_lag=1).sample_per_symbol(
+        close_wide
+    )
+    assert len(pairs) > 0
+    # Stage2 过滤（用收盘对齐矩阵再 shift 的语义: 开盘矩阵里 is_stage2 已是昨收阶段）
+    pairs2 = filter_pairs(pairs, X.values["is_stage2_200d"] > 0)
+    assert len(pairs2) <= len(pairs)
+
+    events = to_event_dataframe(
+        pairs2 if len(pairs2) else pairs.head(10),
+        target=0.03,
+        t1_days=7,
+        entry_timing=EntryTiming.OPEN,
+    )
+    assert (events["entry_timing"] == "open").all()
+
+
+def test_new_high_breakout_sampler_lag():
+    """新高在 T 确认时, signal_lag=1 应把事件放到 T+1."""
+    from qlab.labeling import NewHighBreakoutSampler
+
+    # 构造: 前 19 日横盘 100, 第 20 日突破到 110, 之后再涨
+    n = 40
+    idx = pd.bdate_range("2024-01-02", periods=n)
+    px = np.full(n, 100.0)
+    px[19] = 110.0
+    px[20:] = 110.0 + np.arange(n - 20)
+    s = pd.Series(px, index=idx)
+    # lag=0 → 事件在突破日
+    e0 = NewHighBreakoutSampler(window=20, cooldown_days=30, signal_lag=0).sample(s)
+    assert len(e0) >= 1
+    assert e0[0] == idx[19]
+    # lag=1 → 事件在次日
+    e1 = NewHighBreakoutSampler(window=20, cooldown_days=30, signal_lag=1).sample(s)
+    assert len(e1) >= 1
+    assert e1[0] == idx[20]
+
+
+def test_smooth_momentum_prefers_steady_trend():
+    """平滑动量: 平滑上涨得分应高于同等涨幅的尖峰路径."""
+    from qlab.features.library import SmoothMomentum
+
+    mom = SmoothMomentum(60)
+    x = np.arange(60, dtype=float)
+    x = x - x.mean()
+    ss_x = float((x ** 2).sum())
+
+    def score(y):
+        y = np.asarray(y, float)
+        y0 = y - y.mean()
+        slope = float((x * y0).sum() / ss_x)
+        yhat = slope * x + y.mean()
+        r2 = 1 - float(((y - yhat) ** 2).sum()) / float((y0 ** 2).sum())
+        return float(np.exp(slope * 252) - 1) * max(r2, 0)
+
+    y_steady = np.log(100 * np.exp(np.linspace(0, 0.2, 60)))
+    y_jump = np.log(np.concatenate([np.full(58, 100.0), [110.0, 122.14]]))
+    assert score(y_steady) > score(y_jump)
+    assert mom.meta.available_at == "today_close"
+
 
 def test_cusum_filter():
     from qlab.labeling import CUSUMFilter

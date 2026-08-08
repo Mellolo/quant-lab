@@ -285,6 +285,81 @@ class EntropySampler(EventSampler):
         probs = probs[probs > 0]
         return -float(np.sum(probs * np.log2(probs)))
 
+class NewHighBreakoutSampler(EventSampler):
+    """N 日收盘新高突破采样器（trading-books 15/12）.
+
+    规则
+    ----
+    - 触发: ``close`` 创 ``window`` 日新高（含当日）
+    - ``cooldown_days``: 触发后若干交易日内不再触发
+    - ``signal_lag``: 信号确认日后平移几天再作为事件日。
+
+      默认 ``signal_lag=1``：T 日收盘确认新高 → 事件落在下一根 bar
+     （配合 ``entry_timing=open`` = 次日开盘入场，避免用当日收盘信号冒充当日开盘）。
+      若做收盘入场实验，可设 ``signal_lag=0``。
+    """
+
+    def __init__(
+        self,
+        window: int = 20,
+        cooldown_days: int = 5,
+        signal_lag: int = 1,
+    ):
+        if window < 2:
+            raise ValueError("window 必须 >= 2")
+        if cooldown_days < 0:
+            raise ValueError("cooldown_days 必须 >= 0")
+        if signal_lag < 0:
+            raise ValueError("signal_lag 必须 >= 0")
+        self.window = window
+        self.cooldown_days = cooldown_days
+        self.signal_lag = signal_lag
+
+    def sample(self, prices: pd.DataFrame | pd.Series) -> pd.DatetimeIndex:
+        if isinstance(prices, pd.Series):
+            return self._sample_single(prices)
+        all_events: set[pd.Timestamp] = set()
+        for col in prices.columns:
+            events = self._sample_single(prices[col])
+            all_events.update(events.tolist())
+        return pd.DatetimeIndex(sorted(all_events))
+
+    def sample_per_symbol(self, prices: pd.DataFrame) -> pd.DataFrame:
+        rows = []
+        for col in prices.columns:
+            events = self._sample_single(prices[col])
+            for ts in events:
+                rows.append({"timestamp": ts, "symbol": col})
+        if not rows:
+            return pd.DataFrame(columns=["timestamp", "symbol"])
+        return pd.DataFrame(rows)
+
+    def _sample_single(self, series: pd.Series) -> pd.DatetimeIndex:
+        close = series.dropna()
+        if len(close) < self.window + self.signal_lag:
+            return pd.DatetimeIndex([])
+
+        is_high = (close >= close.rolling(self.window).max()).fillna(False)
+        # 首次触及新高: 今日是窗口高点，昨日不是（减少平台期连触发）
+        first_touch = is_high & ~is_high.shift(1, fill_value=False)
+
+        events: list[pd.Timestamp] = []
+        last_i = -self.cooldown_days - 1
+        idx = close.index
+        n = len(close)
+        for i in range(n):
+            if not bool(first_touch.iloc[i]):
+                continue
+            if i - last_i <= self.cooldown_days:
+                continue
+            j = i + self.signal_lag
+            if j >= n:
+                continue
+            events.append(idx[j])
+            last_i = i
+        return pd.DatetimeIndex(events)
+
+
 class TrendBreakoutSampler(EventSampler):
     """因果趋势突破采样器.
 
@@ -569,3 +644,41 @@ def daily_event_pairs(
         return pd.DataFrame(columns=["timestamp", "symbol"])
     idx = pd.MultiIndex.from_product([dates, syms], names=["timestamp", "symbol"])
     return idx.to_frame(index=False)
+
+
+def filter_pairs(
+    pairs: pd.DataFrame,
+    mask: pd.Series,
+    *,
+    require_true: bool = True,
+) -> pd.DataFrame:
+    """用 (date, symbol) bool mask 过滤采样对.
+
+    典型用法: Stage2 / 成交额宇宙等 BOTH 规则 —— 先算特征或宇宙 mask，
+    再筛 ``NewHighBreakoutSampler`` 的 pairs。
+
+    参数
+    ----
+    pairs : 含 ``timestamp``, ``symbol``
+    mask : MultiIndex(date, symbol) 的 Series；数值型时 ``!=0`` 视为 True
+    require_true : True 时只保留 mask 为真的行
+    """
+    if pairs.empty:
+        return pairs.copy()
+    if not {"timestamp", "symbol"}.issubset(pairs.columns):
+        raise ValueError("pairs 需要列 timestamp, symbol")
+
+    key = pd.MultiIndex.from_arrays(
+        [
+            pd.DatetimeIndex(pairs["timestamp"]).normalize(),
+            pairs["symbol"].to_numpy(),
+        ],
+        names=["date", "symbol"],
+    )
+    m = mask.reindex(key)
+    if m.dtype != bool:
+        m = m.fillna(0).astype(float) != 0.0
+    else:
+        m = m.fillna(False)
+    keep = m.to_numpy() if require_true else ~m.to_numpy()
+    return pairs.loc[keep].reset_index(drop=True)
