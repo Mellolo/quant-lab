@@ -48,3 +48,35 @@ def daily_ewm_vol_panel(close: pd.DataFrame, span: int = 100) -> pd.DataFrame:
         )
     log_ret = np.log(close).diff()
     return log_ret.ewm(span=span).std()
+
+
+def targets_from_panel(
+    panel: pd.DataFrame,
+    pairs: pd.DataFrame | None = None,
+) -> pd.Series:
+    """把宽表 panel（columns=symbols）变成供 ``to_event_dataframe`` 使用的 target.
+
+    返回 MultiIndex ``(date, symbol)`` 的 Series；``to_event_dataframe`` /
+    ``SampleSpec.build_events`` 用 ``target.get((ts, sym))`` 取值。
+
+    Parameters
+    ----------
+    panel :
+        例如 ``daily_ewm_vol_panel(close)``。
+    pairs :
+        若传入，只保留 pairs 涉及到的键（更省内存）；否则返回全 panel 的 stack。
+    """
+    if not isinstance(panel, pd.DataFrame):
+        raise TypeError("targets_from_panel 需要 panel DataFrame (columns=symbols)")
+    stacked = panel.stack(future_stack=True)
+    stacked.index = stacked.index.set_names(["date", "symbol"])
+    if pairs is None or pairs.empty:
+        return stacked
+    keys = pd.MultiIndex.from_arrays(
+        [
+            pd.to_datetime(pairs["timestamp"]).dt.normalize(),
+            pairs["symbol"].astype(str),
+        ],
+        names=["date", "symbol"],
+    )
+    return stacked.reindex(keys)

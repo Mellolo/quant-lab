@@ -1,8 +1,10 @@
 """Triple-Barrier 标注法 — 书 Ch3 §3.4-3.5.
 
-设计：
-- Event 输入：(event_start, symbol, t1, target, side[, entry_timing])
-- Label 输出：(event_start, symbol, bin, ret, touch_time, touch_type)
+研究合约请用 :class:`~qlab.labeling.exit.ExitSettings`（pt/sl + vertical_days），
+再 ``label_events``；本模块是水平屏障实现。
+
+- Event 输入：(event_start, symbol, t1, target, side[, entry_timing[, event_id]])
+- Label 输出：(event_start, symbol, bin, ret, touch_time, touch_type[, event_id])
 """
 
 from __future__ import annotations
@@ -57,11 +59,93 @@ def _series_for_symbol(
     return prices if field == "close" else pd.Series(dtype=float)
 
 
-def _entry_timing_of(row: pd.Series) -> EntryTiming:
-    raw = row["entry_timing"] if "entry_timing" in row.index else EntryTiming.CLOSE
-    if pd.isna(raw) or raw == "":
+def _entry_timing_of(row: pd.Series | object) -> EntryTiming:
+    raw = getattr(row, "entry_timing", None)
+    if raw is None and isinstance(row, pd.Series):
+        raw = row["entry_timing"] if "entry_timing" in row.index else EntryTiming.CLOSE
+    if raw is None or (isinstance(raw, float) and pd.isna(raw)) or raw == "":
         return EntryTiming.CLOSE
     return EntryTiming(str(raw))
+
+
+def _label_one_event(
+    *,
+    event_start: pd.Timestamp,
+    t1,
+    target: float,
+    side: float,
+    timing: EntryTiming,
+    close_s: pd.Series,
+    open_s: pd.Series | None,
+    pt: float,
+    sl: float,
+) -> dict:
+    """对单个事件打屏障标签（供分组循环调用）."""
+    if pd.isna(target) or target <= 0:
+        return {
+            "event_start": event_start,
+            "touch_time": pd.NaT, "touch_type": "invalid", "ret": np.nan,
+        }
+
+    close_path = close_s.loc[event_start:t1]
+
+    if timing == EntryTiming.OPEN:
+        if len(close_path) < 1:
+            return {
+                "event_start": event_start,
+                "touch_time": pd.NaT, "touch_type": "no_data", "ret": np.nan,
+            }
+        if open_s is None:
+            return {
+                "event_start": event_start,
+                "touch_time": pd.NaT, "touch_type": "invalid", "ret": np.nan,
+            }
+        try:
+            entry_price = float(open_s.loc[event_start])
+        except KeyError:
+            entry_price = float("nan")
+        price_path = close_path
+    else:
+        if len(close_path) < 2:
+            return {
+                "event_start": event_start,
+                "touch_time": pd.NaT, "touch_type": "no_data", "ret": np.nan,
+            }
+        entry_price = float(close_path.iloc[0])
+        price_path = close_path
+
+    if pd.isna(entry_price) or entry_price <= 0:
+        return {
+            "event_start": event_start,
+            "touch_time": pd.NaT, "touch_type": "invalid", "ret": np.nan,
+        }
+
+    path_returns = (price_path / entry_price - 1) * side
+    upper_threshold = pt * target if pt > 0 else np.inf
+    lower_threshold = -sl * target if sl > 0 else -np.inf
+
+    touch_upper = path_returns[path_returns >= upper_threshold].index.min()
+    touch_lower = path_returns[path_returns <= lower_threshold].index.min()
+    touch_vertical = t1
+
+    candidates = []
+    if pd.notna(touch_upper):
+        candidates.append((touch_upper, "upper"))
+    if pd.notna(touch_lower):
+        candidates.append((touch_lower, "lower"))
+    candidates.append((touch_vertical, "vertical"))
+    candidates.sort(key=lambda x: x[0])
+    touch_time, touch_type = candidates[0]
+
+    if touch_time in path_returns.index:
+        ret = float(path_returns.loc[touch_time])
+    else:
+        ret = float(path_returns.iloc[-1]) if len(path_returns) else np.nan
+
+    return {
+        "event_start": event_start,
+        "touch_time": touch_time, "touch_type": touch_type, "ret": ret,
+    }
 
 
 def _apply_barriers_single(
@@ -70,7 +154,7 @@ def _apply_barriers_single(
     pt: float,
     sl: float,
 ) -> pd.DataFrame:
-    """对一组 events 应用三屏障. 单线程实现.
+    """对一组 events 应用三屏障. 按 symbol 分组并缓存价格序列.
 
     输入
     ----
@@ -83,9 +167,11 @@ def _apply_barriers_single(
 
     返回
     ----
-    DataFrame，index 同 events，列 [touch_time, touch_type, ret]
+    DataFrame，index 同 events 行序对应的 event_start，列 [touch_time, touch_type, ret]
     """
-    out = []
+    if events.empty:
+        return pd.DataFrame(columns=["touch_time", "touch_type", "ret"])
+
     needs_open = (
         "entry_timing" in events.columns
         and (events["entry_timing"].astype(str) == EntryTiming.OPEN.value).any()
@@ -98,88 +184,47 @@ def _apply_barriers_single(
                 "bars[['open','close']]。"
             )
 
-    for event_start, row in events.iterrows():
-        symbol = row["symbol"]
-        t1 = row["t1"]
-        target = row["target"]
-        side = row["side"] if "side" in row and not pd.isna(row["side"]) else 1.0
-        timing = _entry_timing_of(row)
+    n = len(events)
+    out_rows: list[dict | None] = [None] * n
+    work = events.copy()
+    # 勿用 _pos: itertuples 会改写以下划线开头的列名
+    work["pos"] = np.arange(n)
+    work = work.reset_index()
+    # reset_index 后第一列通常是 event_start
+    if "event_start" not in work.columns:
+        work = work.rename(columns={work.columns[0]: "event_start"})
 
-        if pd.isna(target) or target <= 0:
-            out.append({
-                "event_start": event_start,
-                "touch_time": pd.NaT, "touch_type": "invalid", "ret": np.nan,
-            })
-            continue
+    has_timing = "entry_timing" in work.columns
+    has_side = "side" in work.columns
 
-        close_path = _series_for_symbol(close, symbol, "close").loc[event_start:t1]
+    for symbol, grp in work.groupby("symbol", sort=False):
+        close_s = _series_for_symbol(close, str(symbol), "close")
+        open_s = (
+            _series_for_symbol(close, str(symbol), "open") if needs_open else None
+        )
+        for row in grp.itertuples(index=False):
+            pos = int(row.pos)
+            event_start = pd.Timestamp(row.event_start)
+            t1 = row.t1
+            target = float(row.target) if pd.notna(row.target) else np.nan
+            side = float(row.side) if has_side and pd.notna(row.side) else 1.0
+            if has_timing:
+                timing = _entry_timing_of(row)
+            else:
+                timing = EntryTiming.CLOSE
+            out_rows[pos] = _label_one_event(
+                event_start=event_start,
+                t1=t1,
+                target=target,
+                side=side,
+                timing=timing,
+                close_s=close_s,
+                open_s=open_s,
+                pt=pt,
+                sl=sl,
+            )
 
-        if timing == EntryTiming.OPEN:
-            # 开盘入场: 至少需要当日一根 close 盯市；首日收益 = close_T/open_T - 1
-            if len(close_path) < 1:
-                out.append({
-                    "event_start": event_start,
-                    "touch_time": pd.NaT, "touch_type": "no_data", "ret": np.nan,
-                })
-                continue
-            open_series = _series_for_symbol(close, symbol, "open")
-            try:
-                entry_price = float(open_series.loc[event_start])
-            except KeyError:
-                entry_price = float("nan")
-            price_path = close_path
-        else:
-            # 收盘入场: 入场价 = 当日 close，至少还要一根后续 close
-            if len(close_path) < 2:
-                out.append({
-                    "event_start": event_start,
-                    "touch_time": pd.NaT, "touch_type": "no_data", "ret": np.nan,
-                })
-                continue
-            entry_price = float(close_path.iloc[0])
-            price_path = close_path
-
-        if pd.isna(entry_price) or entry_price <= 0:
-            out.append({
-                "event_start": event_start,
-                "touch_time": pd.NaT, "touch_type": "invalid", "ret": np.nan,
-            })
-            continue
-
-        # 路径收益（按 side 调整）
-        path_returns = (price_path / entry_price - 1) * side
-
-        # 计算触屏障时间
-        upper_threshold = pt * target if pt > 0 else np.inf
-        lower_threshold = -sl * target if sl > 0 else -np.inf
-
-        touch_upper = path_returns[path_returns >= upper_threshold].index.min()
-        touch_lower = path_returns[path_returns <= lower_threshold].index.min()
-        touch_vertical = t1
-
-        # 找最早触碰
-        candidates = []
-        if pd.notna(touch_upper):
-            candidates.append((touch_upper, "upper"))
-        if pd.notna(touch_lower):
-            candidates.append((touch_lower, "lower"))
-        candidates.append((touch_vertical, "vertical"))
-
-        candidates.sort(key=lambda x: x[0])
-        touch_time, touch_type = candidates[0]
-
-        # 实际收益
-        if touch_time in path_returns.index:
-            ret = float(path_returns.loc[touch_time])
-        else:
-            ret = float(path_returns.iloc[-1])
-
-        out.append({
-            "event_start": event_start,
-            "touch_time": touch_time, "touch_type": touch_type, "ret": ret,
-        })
-
-    return pd.DataFrame(out).set_index("event_start")
+    return pd.DataFrame(out_rows).set_index("event_start")
 
 
 def _barrier_worker(
@@ -220,7 +265,7 @@ def label_events(
     参数
     ----
     events : DataFrame, index=event_start, 必备列 [symbol, t1, target]，
-             可选 [side, entry_timing]
+             可选 [side, entry_timing, event_id]
     close  : MultiIndex(date, symbol) 的价格 DataFrame。
 
              - ``entry_timing='open'``（``to_event_dataframe`` 默认）:
@@ -249,7 +294,10 @@ def label_events(
     返回
     ----
     Label DataFrame, index=event_start, 列 [symbol, t1, target, ret, touch_time,
-                                            touch_type, bin]
+                                            touch_type, bin]（透传 event_id 若有）
+
+    注意: 多标的下 ``event_start`` 重复；按位置对齐结果。join 请用
+    ``event_id`` 或 :func:`~qlab.labeling.events.ensure_event_key`。
     """
     if events.empty:
         return pd.DataFrame()

@@ -37,17 +37,26 @@ class Session(StrEnum):
     CLOSE_AUCTION = "close_auction"    # 14:57-15:00 收盘集合竞价
 
 
-class EntryTiming(StrEnum):
-    """日线事件的入场/采样起点.
+class EntryAt(StrEnum):
+    """相对确认日何时入场（采样合约层，研究代码应只用这个）.
 
-    决定 ``event_start`` 当日以开盘还是收盘作为样本起点与三重屏障入场价。
-    采样器仍返回交易日；本枚举是挂在 Event 上的执行语义，不是另一套分钟网格。
-
-    默认（``to_event_dataframe``）为 ``OPEN``：起点=开盘，终点由三重屏障决定。
+    - ``next_open``（默认）: 确认日 T → 下一交易日开盘
+    - ``confirm_close``: 确认日 T 收盘入场（日线确认时刻 = 收盘）
     """
 
-    OPEN = "open"    # 当日开盘入场（默认；路径收益从开盘起算）
-    CLOSE = "close"  # 当日收盘决策/入场（路径收益从收盘起算）
+    NEXT_OPEN = "next_open"
+    CONFIRM_CLOSE = "confirm_close"
+
+
+class EntryTiming(StrEnum):
+    """Event 表上的价格点：``event_start`` 日取开盘还是收盘.
+
+    由 :class:`EntryAt` 映射而来（``next_open``→``open``，``confirm_close``→``close``），
+    供三重屏障与特征 PIT 使用；一般勿直接当作集合约旋钮。
+    """
+
+    OPEN = "open"
+    CLOSE = "close"
 
 
 class ReportType(StrEnum):

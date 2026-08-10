@@ -3,7 +3,7 @@
 `core/` 不依赖任何其他 qlab 模块。所有跨模块共享的概念都在此定义。
 """
 
-from qlab.core.enums import AdjustMode, EntryTiming, Freq, ReportType, Session
+from qlab.core.enums import AdjustMode, EntryAt, EntryTiming, Freq, ReportType, Session
 from qlab.core.exceptions import (
     DataSourceError,
     FeatureComputationError,
@@ -30,6 +30,7 @@ from qlab.core.schema import (
 __all__ = [
     # enums
     "AdjustMode",
+    "EntryAt",
     "EntryTiming",
     "Freq",
     "ReportType",

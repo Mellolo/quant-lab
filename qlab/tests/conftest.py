@@ -59,6 +59,12 @@ def real_close_wide(real_daily):
 
 
 @pytest.fixture(scope="session")
+def real_open_wide(real_daily):
+    """后复权开盘价宽表 columns=symbols."""
+    return real_daily["open"].unstack("symbol")
+
+
+@pytest.fixture(scope="session")
 def real_universe():
     """覆盖 REG_SYMBOLS × 目标区间的 Universe."""
     from qlab.core.calendar import get_default_calendar
@@ -76,21 +82,27 @@ def real_universe():
 
 
 @pytest.fixture(scope="session")
-def real_labels(real_daily, real_close_wide):
-    """真实标签集(CUSUM 采样 + 三重障碍), index=event_start, 含 symbol/t1/bin/ret."""
-    from qlab.core.calendar import get_default_calendar
-    from qlab.labeling import CUSUMFilter, TripleBarrier, to_event_dataframe
-    from qlab.labeling.triple_barrier import label_events
+def real_labels(real_daily, real_close_wide, real_open_wide):
+    """真实标签：CUSUM 确认日 → 次日开盘 + TB 1.5:1 / v10（SampleSpec 合约）."""
+    from qlab.labeling import CUSUMFilter, ExitSettings, SampleSpec
 
-    cal = get_default_calendar()
-    pairs = CUSUMFilter(h=0.04).sample_per_symbol(real_close_wide)
-    pairs = pairs[
-        (pairs["timestamp"] >= pd.Timestamp(REG_START))
-        & (pairs["timestamp"] <= pd.Timestamp(REG_END))
+    confirm = CUSUMFilter(h=0.04).sample_per_symbol(real_close_wide)
+    confirm = confirm[
+        (confirm["timestamp"] >= pd.Timestamp(REG_START))
+        & (confirm["timestamp"] <= pd.Timestamp(REG_END))
     ]
-    events = to_event_dataframe(pairs, target=0.04, t1_days=10, calendar=cal)
-    labels = label_events(
-        events, real_daily[["open", "close"]], TripleBarrier(pt=1.5, sl=1.0)
+
+    class _FixedConfirm:
+        def sample_per_symbol(self, prices):
+            return confirm.copy()
+
+    exit_ = ExitSettings(pt=1.5, sl=1.0, vertical_days=10)
+    labels = SampleSpec(entry=_FixedConfirm(), exit=exit_).run(
+        real_close_wide,
+        open=real_open_wide,
+        target=0.04,
+        label_prices=real_daily[["open", "close"]],
+        drop_no_data=True,
     )
     labels["t1"] = pd.to_datetime(labels["touch_time"])
     return labels

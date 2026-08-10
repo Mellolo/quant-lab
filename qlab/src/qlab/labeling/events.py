@@ -13,7 +13,11 @@ from qlab.core.schema import SCHEMA_EVENT, validate_schema
 
 
 class EventSampler(ABC):
-    """事件采样器基类."""
+    """事件采样器基类：产出**确认日**（该日收盘后触发条件成立）.
+
+    不负责入场。合约层 :class:`~qlab.labeling.sample_spec.SampleSpec`
+    默认把确认日映射到**下一交易日开盘**；也可 ``entry_at=confirm_close``。
+    """
 
     @abstractmethod
     def sample(self, prices: pd.DataFrame | pd.Series) -> pd.DatetimeIndex:
@@ -290,30 +294,26 @@ class NewHighBreakoutSampler(EventSampler):
 
     规则
     ----
-    - 触发: ``close`` 创 ``window`` 日新高（含当日）
+    - 触发: ``close`` 创 ``window`` 日新高（含当日）→ 吐出**确认日**
     - ``cooldown_days``: 触发后若干交易日内不再触发
-    - ``signal_lag``: 信号确认日后平移几天再作为事件日。
+    - 入场日由 :class:`~qlab.labeling.sample_spec.SampleSpec` 统一映射
+      （默认次日开盘）
 
-      默认 ``signal_lag=1``：T 日收盘确认新高 → 事件落在下一根 bar
-     （配合 ``entry_timing=open`` = 次日开盘入场，避免用当日收盘信号冒充当日开盘）。
-      若做收盘入场实验，可设 ``signal_lag=0``。
+    备注: 全市场退出网格显示 ``window=60`` 显著负期望，现行目录只用短窗
+    （默认 20）作候选池，勿裸用长窗新高作进场采样。
     """
 
     def __init__(
         self,
         window: int = 20,
         cooldown_days: int = 5,
-        signal_lag: int = 1,
     ):
         if window < 2:
             raise ValueError("window 必须 >= 2")
         if cooldown_days < 0:
             raise ValueError("cooldown_days 必须 >= 0")
-        if signal_lag < 0:
-            raise ValueError("signal_lag 必须 >= 0")
         self.window = window
         self.cooldown_days = cooldown_days
-        self.signal_lag = signal_lag
 
     def sample(self, prices: pd.DataFrame | pd.Series) -> pd.DatetimeIndex:
         if isinstance(prices, pd.Series):
@@ -336,7 +336,7 @@ class NewHighBreakoutSampler(EventSampler):
 
     def _sample_single(self, series: pd.Series) -> pd.DatetimeIndex:
         close = series.dropna()
-        if len(close) < self.window + self.signal_lag:
+        if len(close) < self.window:
             return pd.DatetimeIndex([])
 
         is_high = (close >= close.rolling(self.window).max()).fillna(False)
@@ -352,101 +352,7 @@ class NewHighBreakoutSampler(EventSampler):
                 continue
             if i - last_i <= self.cooldown_days:
                 continue
-            j = i + self.signal_lag
-            if j >= n:
-                continue
-            events.append(idx[j])
-            last_i = i
-        return pd.DatetimeIndex(events)
-
-
-class TrendBreakoutSampler(EventSampler):
-    """因果趋势突破采样器.
-
-    只用截至当日收盘的信息判断「当前可能处于趋势启动」，不使用未来数据:
-      1. **状态**: 效率比 ER(er_window) > er_threshold
-      2. **趋势方向**: close > MA(ma_window) 且 MA 斜率 > 0
-         斜率 = 当前 MA 相对 slope_lookback 个交易日前的变化
-      3. **触发**: 收盘创 breakout_window 日新高
-      4. **去重**: 触发后 cooldown_days 内不再触发
-
-    满足 PIT——所有量都只用 rolling window 内的历史数据。
-    """
-
-    def __init__(
-        self,
-        er_window: int = 20,
-        er_threshold: float = 0.3,
-        ma_window: int = 60,
-        slope_lookback: int = 20,
-        breakout_window: int = 20,
-        cooldown_days: int = 10,
-    ):
-        if er_window < 2:
-            raise ValueError("er_window 必须 >= 2")
-        if ma_window < 2:
-            raise ValueError("ma_window 必须 >= 2")
-        if breakout_window < 2:
-            raise ValueError("breakout_window 必须 >= 2")
-        self.er_window = er_window
-        self.er_threshold = er_threshold
-        self.ma_window = ma_window
-        self.slope_lookback = slope_lookback
-        self.breakout_window = breakout_window
-        self.cooldown_days = cooldown_days
-
-    def sample(self, prices: pd.DataFrame | pd.Series) -> pd.DatetimeIndex:
-        if isinstance(prices, pd.Series):
-            return self._sample_single(prices)
-        all_events: set[pd.Timestamp] = set()
-        for col in prices.columns:
-            events = self._sample_single(prices[col])
-            all_events.update(events.tolist())
-        return pd.DatetimeIndex(sorted(all_events))
-
-    def sample_per_symbol(self, prices: pd.DataFrame) -> pd.DataFrame:
-        rows = []
-        for col in prices.columns:
-            events = self._sample_single(prices[col])
-            for ts in events:
-                rows.append({"timestamp": ts, "symbol": col})
-        if not rows:
-            return pd.DataFrame(columns=["timestamp", "symbol"])
-        return pd.DataFrame(rows)
-
-    def _efficiency_ratio(self, close: pd.Series) -> pd.Series:
-        """Kaufman Efficiency Ratio (rolling, causal)."""
-        net = (close - close.shift(self.er_window)).abs()
-        path = close.diff().abs().rolling(self.er_window).sum()
-        return net / path.replace(0, np.nan)
-
-    def _sample_single(self, series: pd.Series) -> pd.DatetimeIndex:
-        close = series.dropna()
-        min_len = max(self.er_window, self.ma_window, self.breakout_window) + self.slope_lookback + 1
-        if len(close) < min_len:
-            return pd.DatetimeIndex([])
-
-        er = self._efficiency_ratio(close)
-        ma = close.rolling(self.ma_window).mean()
-        slope = (ma - ma.shift(self.slope_lookback)) / ma.shift(self.slope_lookback)
-        # 创 N 日新高（含当日）
-        breakout = close == close.rolling(self.breakout_window).max()
-
-        cond = (
-            (er > self.er_threshold)
-            & (close > ma)
-            & (slope > 0)
-            & breakout
-        )
-
-        events: list[pd.Timestamp] = []
-        last_i = -self.cooldown_days - 1
-        for i, ok in enumerate(cond):
-            if not ok or pd.isna(ok):
-                continue
-            if i - last_i <= self.cooldown_days:
-                continue
-            events.append(close.index[i])
+            events.append(idx[i])
             last_i = i
         return pd.DatetimeIndex(events)
 
@@ -553,14 +459,68 @@ class HMMTrendSampler(EventSampler):
         return pd.DatetimeIndex(events)
 
 
+def _make_event_ids(timestamps: pd.Series, symbols: pd.Series) -> list[str]:
+    """稳定唯一 event_id: ``{symbol}|{YYYYMMDD}``，同日同标的再追加 ``|n``."""
+    base = [
+        f"{sym}|{pd.Timestamp(ts).strftime('%Y%m%d')}"
+        for ts, sym in zip(timestamps, symbols)
+    ]
+    seen: dict[str, int] = {}
+    out: list[str] = []
+    for b in base:
+        n = seen.get(b, 0)
+        seen[b] = n + 1
+        out.append(b if n == 0 else f"{b}|{n}")
+    return out
+
+
+def ensure_event_key(df: pd.DataFrame) -> pd.DataFrame:
+    """返回适合安全 join 的视图（不修改调用方原表语义以外的列）.
+
+    - 若有唯一 ``event_id`` 列：以 ``event_id`` 为 index（列保留）
+    - 否则：以 ``MultiIndex(event_start, symbol)`` 为 index
+
+    **禁止**只按 ``event_start`` merge（多标的下会错配）。
+    """
+    if df.empty:
+        return df.copy()
+    out = df.copy()
+    if "event_id" in out.columns and out["event_id"].notna().all():
+        if out["event_id"].duplicated().any():
+            raise ValueError(
+                "event_id 含重复，无法作为 join 键。请检查 to_event_dataframe 输出。"
+            )
+        out = out.set_index("event_id", drop=False)
+        out.index.name = "event_id"
+        return out
+    if "symbol" not in out.columns:
+        raise ValueError("ensure_event_key 需要 event_id 列或 symbol 列")
+    if isinstance(out.index, pd.MultiIndex) and list(out.index.names) == [
+        "event_start",
+        "symbol",
+    ]:
+        return out
+    if isinstance(out.index, pd.MultiIndex):
+        event_start = out.index.get_level_values(0)
+    else:
+        event_start = out.index
+    out.index = pd.MultiIndex.from_arrays(
+        [pd.to_datetime(event_start), out["symbol"].astype(str)],
+        names=["event_start", "symbol"],
+    )
+    return out
+
+
 def to_event_dataframe(
     pairs: pd.DataFrame,
     *,
     target: pd.Series | float,
     t1_days: int = 7,
+    exit: "ExitSettings | None" = None,
     side: pd.Series | int | None = None,
     calendar: Calendar | None = None,
     entry_timing: EntryTiming | str = EntryTiming.OPEN,
+    price_end: pd.Timestamp | None = None,
 ) -> pd.DataFrame:
     """把采样器产出的 (timestamp, symbol) 对扩展为 Event schema.
 
@@ -568,7 +528,8 @@ def to_event_dataframe(
     ----
     pairs : DataFrame 含 columns ['timestamp', 'symbol']
     target : 屏障宽度基准. 标量或 Series indexed by (timestamp, symbol)
-    t1_days : 垂直屏障的交易日数
+    t1_days : 垂直屏障的交易日数（当 ``exit`` 未传时使用）
+    exit : 可选出场设定；若传入则用 ``exit.vertical_days`` 覆盖 ``t1_days``
     side : 主模型方向. None 表示不指定（让模型学方向）
     calendar : 交易日历
     entry_timing : 样本起点 / 入场时点.
@@ -578,32 +539,43 @@ def to_event_dataframe(
           首日收益 = close_T / open_T - 1。
         - ``close``: ``event_start`` 日**收盘**入场；三重屏障从收盘价起算。
 
-        注意: 若 pairs 来自**收盘** CUSUM，默认 ``open`` 会把当日收盘信息
-        泄漏进「开盘决策」。应用日频网格（:func:`daily_event_pairs`）、
-        把触发日平移到下一交易日开盘，或显式传 ``entry_timing='close'``。
+        注意: ``pairs`` 的 timestamp 应是**入场日**。采样器吐的是**确认日**时，
+        请走 :class:`~qlab.labeling.sample_spec.SampleSpec`：
+        ``entry_at=next_open`` → 次日 + ``open``；
+        ``entry_at=confirm_close`` → 确认日 + ``close``。
+    price_end : 若给定，将 ``t1`` 裁到不超过该日（减少样本末无谓 no_data）
 
     返回
     ----
     符合 SCHEMA_EVENT 的 DataFrame:
-    index=event_start, columns=[symbol, t1, target, side, entry_timing]
+    index=event_start, columns=[symbol, t1, target, side, entry_timing, event_id]
+
+    注意: ``event_start`` 多标的下会重复；join 请用 ``event_id`` 或
+    :func:`ensure_event_key`，勿只按 ``event_start``。
     """
     timing = EntryTiming(entry_timing)
     cal = calendar or get_default_calendar()
+    v_days = exit.vertical_days if exit is not None else t1_days
+    pe = pd.Timestamp(price_end).normalize() if price_end is not None else None
     if pairs.empty:
         out = pd.DataFrame(
-            columns=["symbol", "t1", "target", "side", "entry_timing"]
+            columns=["symbol", "t1", "target", "side", "entry_timing", "event_id"]
         )
         out.index.name = "event_start"
         return out
 
     rows = []
+    n_clipped = 0
     for _, row in pairs.iterrows():
         ts = pd.Timestamp(row["timestamp"]).normalize()
         sym = row["symbol"]
         try:
-            t1 = cal.next_trading_day(ts, t1_days)
+            t1 = cal.next_trading_day(ts, v_days)
         except Exception:
             t1 = pd.NaT
+        if pe is not None and pd.notna(t1) and t1 > pe and pe > ts:
+            t1 = pe
+            n_clipped += 1
         if isinstance(target, pd.Series):
             tgt = float(target.get((ts, sym), np.nan))
         else:
@@ -624,7 +596,11 @@ def to_event_dataframe(
             "entry_timing": timing.value,
         })
 
-    df = pd.DataFrame(rows).set_index("event_start").sort_index()
+    df = pd.DataFrame(rows)
+    df["event_id"] = _make_event_ids(df["event_start"], df["symbol"])
+    df = df.set_index("event_start").sort_index()
+    if n_clipped:
+        df.attrs["n_t1_clipped"] = n_clipped
     validate_schema(df, SCHEMA_EVENT, strict_index=False)
     return df
 
@@ -633,10 +609,10 @@ def daily_event_pairs(
     symbols: list[str],
     dates: pd.DatetimeIndex,
 ) -> pd.DataFrame:
-    """日频均匀采样: 每个交易日 × 每个标的 一对 (timestamp, symbol).
+    """日频网格：每个交易日 × 每个标的 一对确认日 (timestamp, symbol).
 
-    与 CUSUM 等事件过滤器互补。接 ``to_event_dataframe`` 后默认
-    ``entry_timing=open``（起点开盘，终点由三重屏障决定）。
+    「每一天都是确认日」。入场由 :class:`~qlab.labeling.sample_spec.SampleSpec`
+    决定（默认次日开盘；可选确认日收盘）。
     """
     dates = pd.DatetimeIndex(dates).normalize().unique().sort_values()
     syms = list(dict.fromkeys(symbols))

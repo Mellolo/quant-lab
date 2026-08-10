@@ -379,7 +379,7 @@ def test_four_piece_stack_dollar_stage_smooth_newhigh():
     assert set(stages.unique()).issubset({1.0, 2.0, 3.0, 4.0})
 
     close_wide = daily["close"].unstack("symbol")
-    pairs = NewHighBreakoutSampler(window=20, cooldown_days=5, signal_lag=1).sample_per_symbol(
+    pairs = NewHighBreakoutSampler(window=20, cooldown_days=5).sample_per_symbol(
         close_wide
     )
     assert len(pairs) > 0
@@ -396,8 +396,8 @@ def test_four_piece_stack_dollar_stage_smooth_newhigh():
     assert (events["entry_timing"] == "open").all()
 
 
-def test_new_high_breakout_sampler_lag():
-    """新高在 T 确认时, signal_lag=1 应把事件放到 T+1."""
+def test_new_high_breakout_sampler_emits_confirm_day():
+    """新高只吐确认日（突破日）；入场日交给 SampleSpec."""
     from qlab.labeling import NewHighBreakoutSampler
 
     # 构造: 前 19 日横盘 100, 第 20 日突破到 110, 之后再涨
@@ -407,14 +407,9 @@ def test_new_high_breakout_sampler_lag():
     px[19] = 110.0
     px[20:] = 110.0 + np.arange(n - 20)
     s = pd.Series(px, index=idx)
-    # lag=0 → 事件在突破日
-    e0 = NewHighBreakoutSampler(window=20, cooldown_days=30, signal_lag=0).sample(s)
-    assert len(e0) >= 1
-    assert e0[0] == idx[19]
-    # lag=1 → 事件在次日
-    e1 = NewHighBreakoutSampler(window=20, cooldown_days=30, signal_lag=1).sample(s)
-    assert len(e1) >= 1
-    assert e1[0] == idx[20]
+    events = NewHighBreakoutSampler(window=20, cooldown_days=30).sample(s)
+    assert len(events) >= 1
+    assert events[0] == idx[19]
 
 
 def test_smooth_momentum_prefers_steady_trend():
@@ -576,6 +571,260 @@ def test_to_event_dataframe_default_entry_timing_open():
     )
     ev = to_event_dataframe(pairs, target=0.02, t1_days=5)
     assert (ev["entry_timing"] == "open").all()
+
+
+def test_exit_settings_barrier_and_name():
+    from qlab.labeling import EXIT_RESEARCH_DEFAULT, ExitSettings, TripleBarrier
+
+    ex = ExitSettings(pt=3.0, sl=1.0, vertical_days=20)
+    b = ex.barrier()
+    assert isinstance(b, TripleBarrier)
+    assert b.pt == 3.0 and b.sl == 1.0
+    assert ex.name() == "TB_3_1_v20"
+    assert ExitSettings(1.5, 1.0, 20).name() == "TB_1p5_1_v20"
+    assert EXIT_RESEARCH_DEFAULT.name() == "TB_3_1_v20"
+
+
+def test_sample_spec_build_events_vertical_days():
+    from qlab.core.calendar import get_default_calendar
+    from qlab.labeling import (
+        CUSUMFilter,
+        EXIT_RESEARCH_DEFAULT,
+        SampleSpec,
+        to_event_dataframe,
+    )
+
+    pairs = pd.DataFrame(
+        {"timestamp": pd.to_datetime(["2024-01-02"]), "symbol": ["600519.SH"]}
+    )
+    spec = SampleSpec(entry=CUSUMFilter(h=0.05), exit=EXIT_RESEARCH_DEFAULT)
+    ev = spec.build_events(pairs, target=0.02)
+    cal = get_default_calendar()
+    expect_t1 = cal.next_trading_day(pd.Timestamp("2024-01-02"), 20)
+    assert ev["t1"].iloc[0] == expect_t1
+
+    # exit= 覆盖 t1_days
+    ev2 = to_event_dataframe(
+        pairs, target=0.02, t1_days=5, exit=EXIT_RESEARCH_DEFAULT,
+    )
+    assert ev2["t1"].iloc[0] == expect_t1
+
+
+def test_sample_spec_run_matches_manual_path():
+    """SampleSpec.run ≡ confirmation→次日 + to_event_dataframe(open) + label_events."""
+    from qlab.core.enums import EntryTiming
+    from qlab.labeling import (
+        EXIT_TB_1_5_1_V20,
+        SampleSpec,
+        confirmation_to_entry,
+        daily_event_pairs,
+        label_events,
+        to_event_dataframe,
+    )
+
+    class _DailyEntry:
+        def __init__(self, symbols, dates):
+            self._pairs = daily_event_pairs(symbols, dates)
+
+        def sample_per_symbol(self, prices):
+            return self._pairs.copy()
+
+    days = pd.bdate_range("2024-01-02", periods=30)
+    sym = "600519.SH"
+    idx = pd.MultiIndex.from_product([days, [sym]], names=["date", "symbol"])
+    prices = pd.DataFrame({"open": 100.0, "close": 102.0}, index=idx)
+    close_wide = prices["close"].unstack("symbol")
+
+    # 网格：days[:3] 为确认日 → 合约映射到次日开盘
+    entry = _DailyEntry([sym], days[:3])
+    spec = SampleSpec(entry=entry, exit=EXIT_TB_1_5_1_V20)
+    via_spec = spec.run(
+        close_wide, target=0.015, label_prices=prices, drop_no_data=False,
+    )
+
+    pairs = confirmation_to_entry(entry.sample_per_symbol(close_wide))
+    events = to_event_dataframe(
+        pairs, target=0.015, exit=EXIT_TB_1_5_1_V20, entry_timing=EntryTiming.OPEN,
+    )
+    via_manual = label_events(
+        events, prices, EXIT_TB_1_5_1_V20.barrier(), drop_no_data=False,
+    )
+    pd.testing.assert_frame_equal(via_spec, via_manual)
+
+
+def test_sample_spec_confirm_to_next_open_and_volume_guard():
+    from qlab.core.calendar import get_default_calendar
+    from qlab.labeling import (
+        CUSUMFilter,
+        SampleSpec,
+        VolumeCUSUMFilter,
+        targets_from_panel,
+    )
+
+    days = pd.bdate_range("2024-01-02", periods=40)
+    rng = np.random.default_rng(0)
+    close = pd.DataFrame(
+        {"A.SZ": 100 + rng.normal(0, 1, len(days)).cumsum()},
+        index=days,
+    )
+    spec = SampleSpec(entry=CUSUMFilter(h=0.02))
+    raw = spec.confirmation_pairs(close)
+    trade = spec.sample_pairs(close)
+    if len(raw):
+        cal = get_default_calendar()
+        t0 = pd.Timestamp(raw["timestamp"].iloc[0]).normalize()
+        t1 = pd.Timestamp(trade["timestamp"].iloc[0]).normalize()
+        assert t1 == cal.next_trading_day(t0, 1)
+
+    vol_panel = close * 0 + 1e6
+    with pytest.raises(ValueError, match="volume"):
+        SampleSpec(entry=VolumeCUSUMFilter(h=0.5)).sample_pairs(close)
+    vp = SampleSpec(entry=VolumeCUSUMFilter(h=0.5)).sample_pairs(
+        close, volume=vol_panel,
+    )
+    assert list(vp.columns) == ["timestamp", "symbol"]
+
+    tgt = targets_from_panel(
+        close.pct_change().abs().fillna(0.02), raw.head(3) if len(raw) else None,
+    )
+    assert isinstance(tgt, pd.Series)
+
+
+def test_sample_spec_entry_at_confirm_close():
+    """可选：确认日收盘入场（不映射次日）."""
+    from qlab.core.enums import EntryAt
+    from qlab.labeling import EXIT_TB_1_5_1_V20, SampleSpec, daily_event_pairs
+
+    class _DailyEntry:
+        def __init__(self, symbols, dates):
+            self._pairs = daily_event_pairs(symbols, dates)
+
+        def sample_per_symbol(self, prices):
+            return self._pairs.copy()
+
+    days = pd.bdate_range("2024-01-02", periods=20)
+    sym = "600519.SH"
+    confirm = days[:2]
+    close = pd.DataFrame({sym: 100.0}, index=days)
+    close[sym] = 102.0
+    # 次日涨 → 收盘入场后易触上屏障
+    close.loc[days[1:], sym] = 104.0
+
+    spec = SampleSpec(
+        entry=_DailyEntry([sym], confirm),
+        exit=EXIT_TB_1_5_1_V20,
+        entry_at=EntryAt.CONFIRM_CLOSE,
+    )
+    pairs = spec.sample_pairs(close)
+    assert set(pd.DatetimeIndex(pairs["timestamp"]).normalize()) == {
+        confirm[0].normalize(), confirm[1].normalize(),
+    }
+    labs = spec.run(close, target=0.01, drop_no_data=False)
+    assert (labs["entry_timing"] == "close").all()
+    assert set(pd.DatetimeIndex(labs.index).normalize()) == {
+        confirm[0].normalize(), confirm[1].normalize(),
+    }
+
+
+def test_event_id_unique_and_ensure_event_key():
+    from qlab.labeling import (
+        daily_event_pairs,
+        ensure_event_key,
+        to_event_dataframe,
+    )
+
+    days = pd.bdate_range("2024-01-02", periods=5)
+    pairs = daily_event_pairs(["AAA.SZ", "BBB.SH"], days[:2])
+    ev = to_event_dataframe(pairs, target=0.02, t1_days=3)
+    assert "event_id" in ev.columns
+    assert ev["event_id"].is_unique
+    keyed = ensure_event_key(ev)
+    assert keyed.index.name == "event_id"
+    assert keyed.index.is_unique
+
+
+def test_sample_spec_run_with_wide_open_close():
+    """run(open=, close=) 无需手写 label_prices；网格确认日 → 次日开盘."""
+    from qlab.labeling import EXIT_TB_1_5_1_V20, SampleSpec, daily_event_pairs
+
+    class _DailyEntry:
+        def __init__(self, symbols, dates):
+            self._pairs = daily_event_pairs(symbols, dates)
+
+        def sample_per_symbol(self, prices):
+            return self._pairs.copy()
+
+    days = pd.bdate_range("2024-01-02", periods=20)
+    syms = ["600519.SH", "000001.SZ"]
+    close = pd.DataFrame(
+        {s: 100.0 + i * 0.1 for i, s in enumerate(syms)},
+        index=days,
+    )
+    # 制造日内波动: close > open → 易触上屏障
+    open_ = close * 0.98
+    close = close * 1.02
+    for s in syms:
+        close[s] = 102.0
+        open_[s] = 100.0
+
+    # 确认日 days[:2] → 入场日 days[1], days[2]
+    spec = SampleSpec(
+        entry=_DailyEntry(syms, days[:2]),
+        exit=EXIT_TB_1_5_1_V20,
+    )
+    # 日收益 2%; TB 1.5×target=0.01 → 上屏障 1.5%
+    labs = spec.run(close, open=open_, target=0.01, drop_no_data=False)
+    assert len(labs) == 4  # 2 confirm days × 2 symbols → 2 entry days
+    assert "event_id" in labs.columns
+    assert labs["event_id"].is_unique
+    assert (labs["touch_type"] == "upper").all()
+    assert set(pd.DatetimeIndex(labs.index).normalize()) == {
+        days[1].normalize(), days[2].normalize(),
+    }
+
+
+def test_price_end_clips_t1():
+    from qlab.labeling import to_event_dataframe
+
+    pairs = pd.DataFrame(
+        {"timestamp": pd.to_datetime(["2024-01-02"]), "symbol": ["600519.SH"]}
+    )
+    pe = pd.Timestamp("2024-01-10")
+    ev = to_event_dataframe(pairs, target=0.02, t1_days=20, price_end=pe)
+    assert ev["t1"].iloc[0] == pe
+    assert ev.attrs.get("n_t1_clipped", 0) >= 1
+
+
+def test_label_events_grouped_matches_touch_semantics():
+    """按 symbol 分组加速后，多标的结果仍合理且行数对齐."""
+    from qlab.labeling import TripleBarrier, label_events
+
+    days = pd.bdate_range("2024-01-02", periods=30)
+    syms = ["A.SZ", "B.SZ"]
+    idx = pd.MultiIndex.from_product([days, syms], names=["date", "symbol"])
+    prices = pd.DataFrame({"open": 100.0, "close": 100.0}, index=idx)
+    # A 逐日上涨, B 下跌
+    for i, d in enumerate(days):
+        prices.loc[(d, "A.SZ"), "close"] = 100 + i
+        prices.loc[(d, "A.SZ"), "open"] = 100 + i - 0.5
+        prices.loc[(d, "B.SZ"), "close"] = 100 - i * 0.5
+        prices.loc[(d, "B.SZ"), "open"] = 100 - i * 0.5 + 0.2
+
+    events = pd.DataFrame(
+        {
+            "symbol": ["A.SZ", "B.SZ", "A.SZ"],
+            "t1": [days[10], days[10], days[15]],
+            "target": [0.02, 0.02, 0.02],
+            "entry_timing": ["open", "open", "open"],
+            "event_id": ["A.SZ|20240102", "B.SZ|20240102", "A.SZ|20240105"],
+        },
+        index=pd.DatetimeIndex([days[0], days[0], days[3]], name="event_start"),
+    )
+    labs = label_events(events, prices, TripleBarrier(1.0, 1.0), drop_no_data=False)
+    assert len(labs) == 3
+    assert list(labs["symbol"]) == ["A.SZ", "B.SZ", "A.SZ"]
+    assert labs.loc[labs["symbol"] == "A.SZ", "touch_type"].iloc[0] == "upper"
+    assert labs.loc[labs["symbol"] == "B.SZ", "touch_type"].iloc[0] == "lower"
 
 
 # ---- weights ---------------------------------------------------------------

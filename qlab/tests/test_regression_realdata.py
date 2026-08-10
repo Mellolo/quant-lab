@@ -172,6 +172,213 @@ class TestRegressionFeatures:
 
 
 # ======================================================================
+# sampling 合约（入场 + 经典 TB 出场）
+# ======================================================================
+class TestRegressionSampling:
+    """采样合约: 确认日 → 次日开盘 / 可选确认收盘 + ExitSettings."""
+
+    def test_cusum_confirm_maps_to_next_open(
+        self, real_close_wide, real_open_wide, real_daily,
+    ):
+        from qlab.core.calendar import get_default_calendar
+        from qlab.core.enums import EntryAt
+        from qlab.labeling import (
+            EXIT_RESEARCH_DEFAULT,
+            CUSUMFilter,
+            SampleSpec,
+        )
+
+        cal = get_default_calendar()
+        spec = SampleSpec(entry=CUSUMFilter(h=0.05), exit=EXIT_RESEARCH_DEFAULT)
+        confirm = spec.confirmation_pairs(real_close_wide)
+        confirm = confirm[
+            (confirm["timestamp"] >= pd.Timestamp(REG_START))
+            & (confirm["timestamp"] <= pd.Timestamp(REG_END))
+        ]
+        assert len(confirm) > 50, f"确认日过少: {len(confirm)}"
+
+        entry = spec.sample_pairs(real_close_wide)
+        # 按确认日窗口对齐后比较映射
+        entry_clip = confirmation_to_entry_clip(confirm, entry, cal)
+        assert len(entry_clip) == len(confirm)
+        for c, e in zip(
+            pd.to_datetime(confirm["timestamp"]),
+            pd.to_datetime(entry_clip["timestamp"]),
+        ):
+            assert e.normalize() == cal.next_trading_day(c.normalize(), 1)
+
+        labs = spec.run(
+            real_close_wide,
+            open=real_open_wide,
+            target=0.03,
+            label_prices=real_daily[["open", "close"]],
+            drop_no_data=True,
+        )
+        labs = labs[
+            (labs.index >= pd.Timestamp(REG_START))
+            & (labs.index <= pd.Timestamp(REG_END))
+        ]
+        assert len(labs) > 50
+        assert (labs["entry_timing"] == "open").all()
+        assert labs["event_id"].is_unique
+        assert spec._entry_at() == EntryAt.NEXT_OPEN
+
+    def test_grid_daily_confirm_next_open(
+        self, real_close_wide, real_open_wide, real_daily,
+    ):
+        from qlab.core.calendar import get_default_calendar
+        from qlab.labeling import (
+            EXIT_TB_1_5_1_V20,
+            SampleSpec,
+            daily_event_pairs,
+        )
+
+        cal = get_default_calendar()
+        # 取一小段交易日作确认网格
+        days = cal.trading_days(
+            pd.Timestamp("2024-06-03"), pd.Timestamp("2024-06-14"),
+        )
+        syms = REG_SYMBOLS[:3]
+
+        class _Grid:
+            def sample_per_symbol(self, prices):
+                return daily_event_pairs(syms, days)
+
+        spec = SampleSpec(entry=_Grid(), exit=EXIT_TB_1_5_1_V20)
+        confirm = spec.confirmation_pairs(real_close_wide)
+        entry = spec.sample_pairs(real_close_wide)
+        assert len(confirm) == len(days) * len(syms)
+        assert len(entry) == len(confirm)
+        # 入场日 = 确认日的下一交易日
+        for c, e in zip(
+            pd.to_datetime(confirm.sort_values(["symbol", "timestamp"])["timestamp"]),
+            pd.to_datetime(entry.sort_values(["symbol", "timestamp"])["timestamp"]),
+        ):
+            assert e.normalize() == cal.next_trading_day(c.normalize(), 1)
+
+        labs = spec.run(
+            real_close_wide,
+            open=real_open_wide,
+            target=0.02,
+            label_prices=real_daily[["open", "close"]],
+            drop_no_data=False,
+        )
+        assert (labs["entry_timing"] == "open").all()
+        assert len(labs) == len(entry)
+
+    def test_confirm_close_entry_on_real(
+        self, real_close_wide, real_daily,
+    ):
+        from qlab.core.enums import EntryAt
+        from qlab.labeling import (
+            EXIT_TB_1_5_1_V20,
+            CUSUMFilter,
+            SampleSpec,
+        )
+
+        spec = SampleSpec(
+            entry=CUSUMFilter(h=0.06),
+            exit=EXIT_TB_1_5_1_V20,
+            entry_at=EntryAt.CONFIRM_CLOSE,
+        )
+        confirm = spec.confirmation_pairs(real_close_wide)
+        confirm = confirm[
+            (confirm["timestamp"] >= pd.Timestamp(REG_START))
+            & (confirm["timestamp"] <= pd.Timestamp(REG_END))
+        ]
+        entry = spec.sample_pairs(real_close_wide)
+        entry = entry[
+            (entry["timestamp"] >= pd.Timestamp(REG_START))
+            & (entry["timestamp"] <= pd.Timestamp(REG_END))
+        ]
+        # 确认收盘：入场日 == 确认日
+        merged = confirm.merge(
+            entry, on=["timestamp", "symbol"], how="inner",
+        )
+        assert len(merged) == len(confirm)
+
+        labs = spec.run(
+            real_close_wide,
+            target=0.03,
+            label_prices=real_daily[["close"]],
+            drop_no_data=True,
+        )
+        labs = labs[
+            (labs.index >= pd.Timestamp(REG_START))
+            & (labs.index <= pd.Timestamp(REG_END))
+        ]
+        assert len(labs) > 30
+        assert (labs["entry_timing"] == "close").all()
+
+    def test_exit_settings_tb_touch_types(
+        self, real_close_wide, real_open_wide, real_daily,
+    ):
+        """经典 TB：touch_type ∈ {upper, lower, vertical}（丢弃 no_data 后）."""
+        from qlab.labeling import (
+            EXIT_RESEARCH_DEFAULT,
+            CUSUMFilter,
+            SampleSpec,
+        )
+
+        spec = SampleSpec(entry=CUSUMFilter(h=0.05), exit=EXIT_RESEARCH_DEFAULT)
+        labs = spec.run(
+            real_close_wide,
+            open=real_open_wide,
+            target=0.03,
+            label_prices=real_daily[["open", "close"]],
+            drop_no_data=True,
+        )
+        labs = labs[
+            (labs.index >= pd.Timestamp(REG_START))
+            & (labs.index <= pd.Timestamp(REG_END))
+        ]
+        assert len(labs) > 50
+        assert set(labs["touch_type"]) <= {"upper", "lower", "vertical"}
+        assert {"upper", "lower"}.issubset(set(labs["touch_type"]))
+        starts = pd.DatetimeIndex(labs.index)
+        touch = pd.to_datetime(labs["touch_time"])
+        assert (touch >= starts).all()
+
+    def test_new_high_confirm_then_next_open(self, real_close_wide):
+        from qlab.core.calendar import get_default_calendar
+        from qlab.labeling import NewHighBreakoutSampler, SampleSpec
+
+        cal = get_default_calendar()
+        sampler = NewHighBreakoutSampler(window=20, cooldown_days=5)
+        confirm = sampler.sample_per_symbol(real_close_wide)
+        confirm = confirm[
+            (confirm["timestamp"] >= pd.Timestamp(REG_START))
+            & (confirm["timestamp"] <= pd.Timestamp(REG_END))
+        ]
+        assert len(confirm) > 0
+        entry = SampleSpec(entry=sampler).sample_pairs(real_close_wide)
+        # 抽查：每条确认日映射到次日
+        sample = confirm.head(20)
+        for row in sample.itertuples():
+            exp = cal.next_trading_day(pd.Timestamp(row.timestamp).normalize(), 1)
+            hit = entry[
+                (entry["symbol"] == row.symbol)
+                & (pd.to_datetime(entry["timestamp"]).dt.normalize() == exp)
+            ]
+            assert len(hit) >= 1
+
+
+def confirmation_to_entry_clip(confirm: pd.DataFrame, entry: pd.DataFrame, cal) -> pd.DataFrame:
+    """按确认日顺序构造期望入场日，再与 entry 按 (symbol, 期望日) 对齐."""
+    rows = []
+    for r in confirm.itertuples():
+        rows.append({
+            "timestamp": cal.next_trading_day(pd.Timestamp(r.timestamp).normalize(), 1),
+            "symbol": r.symbol,
+        })
+    expect = pd.DataFrame(rows)
+    # entry 可能含窗口外映射；用 merge 校验存在性
+    m = expect.merge(entry, on=["timestamp", "symbol"], how="left", indicator=True)
+    assert (m["_merge"] == "both").all(), "部分确认日未映射到入场日"
+    return expect
+
+
+# ======================================================================
 # labeling 层
 # ======================================================================
 class TestRegressionLabeling:

@@ -87,12 +87,26 @@ class AShareCalendar:
         return date - pd.tseries.offsets.BDay(n)
 
     def next_trading_day(self, date: pd.Timestamp, n: int = 1) -> pd.Timestamp:
+        """返回 ``date`` 之后第 ``n`` 个交易日.
+
+        若 ``date`` 本身不是交易日（价格索引含假期等），先落到其后最近
+        交易日并计为第 1 步，避免 ``exchange_calendars`` 抛 NotSessionError。
+        """
         date = pd.Timestamp(date).normalize()
+        if n < 0:
+            raise ValueError("n 必须 >= 0")
+        if n == 0:
+            return date
         if self._cal is not None:
             cur = date
+            if not self._cal.is_session(cur):
+                cur = pd.Timestamp(self._cal.date_to_session(cur, direction="next")).normalize()
+                n -= 1
+                if n == 0:
+                    return cur
             for _ in range(n):
                 cur = self._cal.next_session(cur)
-            return cur
+            return pd.Timestamp(cur).normalize()
         return date + pd.tseries.offsets.BDay(n)
 
     def count_trading_days(self, start: pd.Timestamp, end: pd.Timestamp) -> int:

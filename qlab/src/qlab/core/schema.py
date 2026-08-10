@@ -231,12 +231,19 @@ SCHEMA_EVENT = Schema(
             description="样本起点/入场时点: 'open'(to_event_dataframe 默认) 或 'close'。"
                         "列缺失时 label_events 视为 close，以兼容手写旧事件表",
         ),
+        ColumnSpec(
+            "event_id",
+            "str",
+            description="稳定唯一事件键（多标的下 event_start 会重复；join 请用 event_id 或 "
+                        "(event_start, symbol)，勿只按 event_start）。可选列，手写旧表可缺。",
+        ),
     ],
     invariants=[
         "target > 0",
         "t1 > event_start（若 t1 非 NaT）",
         "event_start 必须是交易时刻",
         "entry_timing ∈ {open, close}（若列存在）",
+        "event_id 若存在则应唯一",
     ],
 )
 
@@ -256,6 +263,11 @@ SCHEMA_LABEL = Schema(
         ColumnSpec("ret", "float64", description="实际实现的收益率"),
         ColumnSpec("touch_time", "datetime64[ns]", description="首次触屏障的时刻"),
         ColumnSpec("touch_type", "str", description="upper/lower/vertical/invalid/no_data/suspended"),
+        ColumnSpec(
+            "event_id",
+            "str",
+            description="透传自 Event；可选。join 优先用此列。",
+        ),
     ],
     invariants=[
         "touch_time >= event_start 且 touch_time <= t1（若 t1 非 NaT）",
@@ -774,6 +786,11 @@ def _check_event_invariants(df: pd.DataFrame) -> None:
             errs.append(
                 f"entry_timing 非法(应 ∈ {{open, close}}): {int(bad.sum())} 行"
             )
+
+    if "event_id" in df.columns:
+        ids = df["event_id"].dropna()
+        if ids.duplicated().any():
+            errs.append(f"event_id 重复: {int(ids.duplicated().sum())} 行")
 
     if errs:
         raise SchemaViolationError(
