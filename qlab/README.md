@@ -38,7 +38,7 @@ data = DataLayer(source=FakeDataSource(seed=42))
 features = FeatureMatrix(
     data=data,
     features=[Momentum(window=5), Volatility(window=20)],
-    universe='all_a',
+    universe='main_a',
     date_range=('2022-01-01', '2024-12-31'),
 ).build()
 ```

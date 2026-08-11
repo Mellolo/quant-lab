@@ -47,7 +47,7 @@ pytest -m realdata -k RegressionFeatures      # 只回归 features 模块
 | `PathEquivalence` | 7 | **批量≡逐只**、单点≡区间、`universe`≡`index_weights`、PIT 两路径 |
 | `ParameterMatrix` | 22 | 5 频率 / 3×3 行业 / 2 概念源 / 3 报告类型 |
 | `SymbolTypes` | 7 | 主板/科创/创业/ETF/指数/北交所 的支持边界 |
-| `RemainingParams` | 20 | 10 个 Barra 因子 / billboard 天数 / 9 种 universe spec |
+| `RemainingParams` | 20 | 10 个 Barra 因子 / billboard 天数 / 指数+宽基宇宙规格 |
 
 ## 三、已覆盖维度
 
@@ -61,7 +61,7 @@ pytest -m realdata -k RegressionFeatures      # 只回归 features 模块
 标的类型      主板/科创板/创业板/ETF/指数/北交所
 因子库        17 个注册因子（含参数化实例）
 Barra 因子    10 个
-universe spec 9 种写法（含 UniverseSpec 工厂别名 6 个）
+universe：csi300/500/800/1000 + main_a / hs_a（旧 all_a 已移除）
 时间跨度      单日 / 2 年 / 6 年
 样本规模      2 只 / 150 只 / 全 A 5118 只
 ```

@@ -19,7 +19,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from tests.conftest import REG_END, REG_START, REG_SYMBOLS
+from tests.conftest import REG_END, REG_START, REG_SYMBOLS, REG_WARMUP
 
 pytestmark = pytest.mark.realdata
 
@@ -361,6 +361,137 @@ class TestRegressionSampling:
                 & (pd.to_datetime(entry["timestamp"]).dt.normalize() == exp)
             ]
             assert len(hit) >= 1
+
+    def test_build_labeled_samples_real(
+        self, real_layer, real_universe, real_close_wide, real_open_wide, real_daily,
+    ):
+        """真实数据走唯一安全入口：事件 / 矩阵 / X 入场点一致."""
+        from qlab.core.enums import EntryTiming
+        from qlab.labeling import (
+            EXIT_RESEARCH_DEFAULT,
+            CUSUMFilter,
+            SampleSpec,
+            build_labeled_samples,
+        )
+
+        spec = SampleSpec(entry=CUSUMFilter(h=0.05), exit=EXIT_RESEARCH_DEFAULT)
+        out = build_labeled_samples(
+            spec,
+            real_close_wide,
+            target=0.03,
+            features=["mom_5d", "ewm_vol_20d", "is_stage2_200d"],
+            data=real_layer,
+            universe=real_universe,
+            date_range=(REG_START, REG_END),
+            open=real_open_wide,
+            label_prices=real_daily[["open", "close"]],
+            drop_no_data=True,
+            generate_mask=False,
+        )
+        assert len(out.labels) > 50
+        assert len(out.X) == len(out.labels)
+        assert out.feature_matrix.entry_timing == EntryTiming.OPEN
+        assert (out.events["entry_timing"] == "open").all()
+        assert out.X["mom_5d"].notna().mean() > 0.5
+
+
+class TestRegressionSampleMasks:
+    """采样门: 真实数据上可叠加、能收缩样本、与特征面板一致."""
+
+    def test_main_stack_gates_shrink_new_high_pairs(
+        self, real_daily, real_close_wide, real_layer,
+    ):
+        from qlab.data.industry import industry_matrix_as_of
+        from qlab.labeling import (
+            NewHighBreakoutSampler,
+            combine_masks,
+            filter_pairs,
+            industry_leader_mask,
+            industry_rs_mask,
+            liquidity_top_n_mask,
+            market_breadth_mask,
+            near_high_mask,
+            relative_strength_mask,
+            stage2_mask,
+            tradable_hygiene_mask,
+            volume_confirm_mask,
+        )
+
+        close = real_close_wide
+        amount = real_daily["amount"].unstack("symbol")
+        pairs = NewHighBreakoutSampler(window=20, cooldown_days=5).sample_per_symbol(
+            close
+        )
+        pairs = pairs[
+            (pairs["timestamp"] >= pd.Timestamp(REG_START))
+            & (pairs["timestamp"] <= pd.Timestamp(REG_END))
+        ]
+        assert len(pairs) > 0
+
+        hygiene = tradable_hygiene_mask(
+            real_daily,
+            min_listing_days=30,
+            min_close=1.0,
+            min_avg_amount=1e6,
+            avg_amount_window=20,
+        )
+        gates = combine_masks(
+            hygiene,
+            liquidity_top_n_mask(amount, n=8, window=20),
+            stage2_mask(close),
+            relative_strength_mask(close, method="smooth", window=60, top_pct=0.5),
+            near_high_mask(close, window=60, max_dist=0.35),
+            volume_confirm_mask(amount, window=5, min_ratio=1.0),
+            market_breadth_mask(close, min_advance_pct=0.3),
+            how="and",
+        )
+        kept = filter_pairs(pairs, gates)
+        assert len(kept) < len(pairs)
+        assert len(kept) > 0
+
+        # 门与 core.price_panels 同算法（特征层也走同一面板，避免双份漂移）
+        from qlab.core.price_panels import is_stage2_panel
+
+        s2 = stage2_mask(close)
+        expect = is_stage2_panel(close).stack(future_stack=True)
+        expect.index = expect.index.set_names(["date", "symbol"])
+        common = s2.index.intersection(expect.index)
+        assert len(common) > 1000
+        assert (
+            s2.reindex(common).fillna(False) == expect.reindex(common).fillna(False)
+        ).all()
+
+        # 行业门：有行业数据时能跑通并进一步收缩
+        try:
+            ind_hist = real_layer.source.fetch_industry_classification(
+                list(close.columns),
+                (pd.Timestamp(REG_WARMUP), pd.Timestamp(REG_END)),
+                system="sw",
+                level=1,
+                sample_freq="Q",
+            )
+        except TypeError:
+            # 旧签名无 sample_freq 时回退
+            ind_hist = real_layer.source.fetch_industry_classification(
+                list(close.columns),
+                (pd.Timestamp(REG_WARMUP), pd.Timestamp(REG_END)),
+                system="sw",
+                level=1,
+            )
+        except Exception as exc:
+            pytest.skip(f"行业数据不可用: {exc}")
+        if ind_hist is None or len(ind_hist) == 0:
+            pytest.skip("行业数据为空")
+        ind_mat = industry_matrix_as_of(
+            ind_hist, list(close.columns), close.index, system="sw", level=1
+        )
+        ind_gate = combine_masks(
+            industry_rs_mask(close, ind_mat, window=20, top_n_industries=3),
+            industry_leader_mask(close, ind_mat, window=20, top_pct=0.5),
+            how="and",
+        )
+        kept2 = filter_pairs(kept, ind_gate)
+        assert len(kept2) <= len(kept)
 
 
 def confirmation_to_entry_clip(confirm: pd.DataFrame, entry: pd.DataFrame, cal) -> pd.DataFrame:
@@ -1441,18 +1572,23 @@ class TestRegressionRemainingParams:
             f"{factory}(spec={spec!r}) 应 {expected} 只"
         )
 
-    def test_universe_all_a_variants(self, real_layer):
-        """all_a 家族(含参数后缀)与裸 all 都应解析为全市场."""
-        from qlab.data.universe import UniverseSpec
+    def test_universe_main_a_and_hs_a(self, real_layer):
+        """宽基池: 剔 ST; main_a 额外剔科创; 二者均无北交/688 违规码."""
+        from qlab.data.universe import UniverseSpec, is_bj_symbol, is_star_symbol
 
-        sizes = set()
-        for spec in (
-            "all", "*", "all_a",
-            UniverseSpec.all_a().name,
-            UniverseSpec.all_a(exclude_st=False).name,
-        ):
-            uni = real_layer.universe(spec, "2024-06-03", "2024-06-14")
-            n = len(uni.all_symbols())
-            assert n > 4000, f"{spec!r} 应是全市场规模, 实际 {n}"
-            sizes.add(n)
-        assert len(sizes) == 1, f"全市场各写法应给出相同规模, 实际 {sizes}"
+        hs = real_layer.universe(UniverseSpec.hs_a(), "2024-06-03", "2024-06-14")
+        main = real_layer.universe(UniverseSpec.main_a(), "2024-06-03", "2024-06-14")
+        hs_syms = hs.all_symbols()
+        main_syms = main.all_symbols()
+        assert len(hs_syms) > 3000
+        assert len(main_syms) > 2000
+        assert len(main_syms) < len(hs_syms), "main_a 应因剔科创而更小"
+        assert not any(is_bj_symbol(s) for s in hs_syms)
+        assert not any(is_bj_symbol(s) for s in main_syms)
+        assert not any(is_star_symbol(s) for s in main_syms)
+        # 至少有一些 688 留在 hs_a（科创保留）
+        assert any(is_star_symbol(s) for s in hs_syms)
+
+        # 旧 all_a 规格应 fail-loud
+        with pytest.raises(ValueError, match="已移除"):
+            real_layer.universe("all_a", "2024-06-03", "2024-06-14")

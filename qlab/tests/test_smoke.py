@@ -340,29 +340,24 @@ def test_pit_blocks_same_day_close_leak_on_open_entry():
 
 # ---- labeling --------------------------------------------------------------
 
-def test_four_piece_stack_dollar_stage_smooth_newhigh():
-    """四件套烟雾: 成交额宇宙 + Stage2 + 平滑动量 + 新高采样."""
+def test_four_piece_stack_stage_smooth_newhigh():
+    """四件套烟雾: 宇宙 + Stage2 + 平滑动量 + 新高采样（成交额用采样门）."""
     from qlab.core.enums import EntryTiming
-    from qlab.data import DataLayer, filter_by_dollar_volume
+    from qlab.data import DataLayer
     from qlab.data.sources import FakeDataSource
     from qlab.features import build_feature_matrix
     from qlab.features.library import IsStage2, SmoothMomentum, StageLabel
     from qlab.labeling import (
         NewHighBreakoutSampler,
         filter_pairs,
+        liquidity_top_n_mask,
         to_event_dataframe,
     )
 
     data = DataLayer(source=FakeDataSource(seed=2, n_symbols=8))
-    uni0 = data.universe("csi500", "2022-01-01", "2023-12-31")
-    syms = uni0.all_symbols()
+    uni = data.universe("csi500", "2022-01-01", "2023-12-31")
+    syms = uni.all_symbols()
     daily = data.daily(syms, "2022-01-01", "2023-12-31", validate=False)
-
-    uni = filter_by_dollar_volume(
-        uni0, daily, min_avg_amount=1.0, lookback_days=20,
-    )
-    assert uni.all_symbols()  # Fake 有成交额，不应滤空
-    assert "|amt" in uni.name
 
     X = build_feature_matrix(
         features=[SmoothMomentum(60), StageLabel(), IsStage2()],
@@ -379,10 +374,12 @@ def test_four_piece_stack_dollar_stage_smooth_newhigh():
     assert set(stages.unique()).issubset({1.0, 2.0, 3.0, 4.0})
 
     close_wide = daily["close"].unstack("symbol")
+    amount = daily["amount"].unstack("symbol")
     pairs = NewHighBreakoutSampler(window=20, cooldown_days=5).sample_per_symbol(
         close_wide
     )
     assert len(pairs) > 0
+    pairs = filter_pairs(pairs, liquidity_top_n_mask(amount, n=max(2, len(syms)), window=5))
     # Stage2 过滤（用收盘对齐矩阵再 shift 的语义: 开盘矩阵里 is_stage2 已是昨收阶段）
     pairs2 = filter_pairs(pairs, X.values["is_stage2_200d"] > 0)
     assert len(pairs2) <= len(pairs)
@@ -1732,7 +1729,7 @@ def test_feature_store_invalidates_on_version_change():
 
     src = FakeDataSource(seed=3, n_symbols=3, start_year=2023)
     layer = DataLayer(source=src)
-    uni = layer.universe("all_a", "2023-02-01", "2023-02-28")
+    uni = layer.universe("hs_a", "2023-02-01", "2023-02-28")
     fs = InMemoryFeatureStore()
     m1 = build_feature_matrix(
         features=[_V1()], data=layer, universe=uni,
@@ -1834,7 +1831,7 @@ def test_feature_matrix_degenerate_inputs():
     assert "mom_5d" in m.values.columns, "空矩阵也应保留列结构"
 
     # 空 features 列表
-    uni = layer.universe("all_a", *rng)
+    uni = layer.universe("hs_a", *rng)
     m2 = build_feature_matrix(features=[], data=layer, universe=uni, date_range=rng)
     assert len(m2.values) == 0 and len(m2.metas) == 0
 
@@ -1968,7 +1965,7 @@ def test_daily_rejects_adjust_switching():
 
     layer = DataLayer(source=FakeDataSource(seed=2, n_symbols=2, start_year=2023))
     syms = layer.source.fetch_universe(
-        "all_a", (pd.Timestamp("2023-02-01"), pd.Timestamp("2023-02-10"))
+        "hs_a", (pd.Timestamp("2023-02-01"), pd.Timestamp("2023-02-10"))
     ).index.get_level_values("symbol").unique().tolist()[:2]
     rng = ("2023-02-01", "2023-02-10")
 

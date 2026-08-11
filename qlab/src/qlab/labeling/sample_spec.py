@@ -131,6 +131,20 @@ class SampleSpec:
     def _entry_at(self) -> EntryAt:
         return EntryAt(self.entry_at)
 
+    @property
+    def event_entry_timing(self) -> EntryTiming:
+        """事件 / 特征矩阵共用的入场时点（由 ``entry_at`` 导出）.
+
+        - ``next_open`` → ``EntryTiming.OPEN``
+        - ``confirm_close`` → ``EntryTiming.CLOSE``
+
+        建因子时必须 ``build_feature_matrix(entry_timing=spec.event_entry_timing)``，
+        或直接用 :func:`~qlab.labeling.sample_frame.build_labeled_samples`。
+        """
+        if self._entry_at() == EntryAt.NEXT_OPEN:
+            return EntryTiming.OPEN
+        return EntryTiming.CLOSE
+
     def confirmation_pairs(
         self,
         prices: pd.DataFrame,
@@ -173,18 +187,13 @@ class SampleSpec:
         price_end: pd.Timestamp | None = None,
     ) -> pd.DataFrame:
         """入场日 pairs → SCHEMA_EVENT."""
-        timing = (
-            EntryTiming.OPEN
-            if self._entry_at() == EntryAt.NEXT_OPEN
-            else EntryTiming.CLOSE
-        )
         return to_event_dataframe(
             pairs,
             target=target,
             exit=self.exit,
             side=side,
             calendar=calendar,
-            entry_timing=timing,
+            entry_timing=self.event_entry_timing,
             price_end=price_end,
         )
 

@@ -129,36 +129,34 @@ def _is_stock_symbol(symbol: str) -> bool:
 #: :class:`~qlab.data.universe.UniverseSpec` 工厂方法生成的别名 → 聚宽指数代码。
 #:
 #: ``UniverseSpec.csi300()`` 得到的 name 是 ``'csi300'`` 而非 ``'000300.SH'``,
-#: ``UniverseSpec.all_a()`` 得到 ``'all_a:st=1,days=30'`` —— 不做映射的话
-#: 这些**文档推荐的标准入口**会被当成指数代码去解析,
-#: 报“无法识别的交易所后缀”。
+#: 不做映射会被当成指数代码去解析, 报“无法识别的交易所后缀”。
 _UNIVERSE_ALIASES = {
     "csi300": "000300.SH",
     "csi500": "000905.SH",
     "csi800": "000906.SH",
     "csi1000": "000852.SH",
-    "sse50": "000016.SH",
-    "csi_all": "000985.SH",
 }
 
 
 def _resolve_universe_spec(spec: str) -> str:
-    """把 universe spec 归一到 ``'all'`` 或指数代码.
+    """把 universe spec 归一到 ``'all'`` / ``'main_a'`` / ``'hs_a'`` 或指数代码.
 
-    支持三类写法:
-
-    - 指数代码: ``'000300.SH'`` / ``'000300.XSHG'`` → 原样返回
+    - 指数代码: ``'000300.SH'`` → 原样
     - 工厂别名: ``'csi300'`` → ``'000300.SH'``
-    - 全市场: ``'all'`` / ``'*'`` / ``'all_a'`` / ``'all_a:st=1,days=30'`` → ``'all'``
-
-    ``all_a`` 的参数后缀(st/days)只影响**后置过滤**, 不影响取数范围,
-    故归一时直接舍弃 —— 过滤由调用方根据 ``is_st`` /
-    ``days_since_listing`` 列自行完成。
+    - 宽基池: ``'main_a'`` / ``'hs_a'`` → 原样（取全市场后再按规则过滤）
+    - 调试用裸全市场: ``'all'`` / ``'*'`` → ``'all'``（不做 ST/板块过滤）
     """
     s = str(spec).strip()
     head = s.split(":", 1)[0].lower()
-    if head in ("all", "*", "all_a", "all_a_raw"):
+    if head in ("all", "*"):
         return "all"
+    if head in ("main_a", "hs_a"):
+        return head
+    if head in ("all_a", "all_a_raw"):
+        raise ValueError(
+            f"宇宙规格 {spec!r} 已移除。请改用 UniverseSpec.main_a() "
+            f"（剔北交/科创/ST）或 UniverseSpec.hs_a()（剔北交/ST，保留科创）。"
+        )
     return _UNIVERSE_ALIASES.get(head, s)
 
 
@@ -913,37 +911,32 @@ class JQDataSource:
     def fetch_universe(
         self, spec: str, date_range: tuple[pd.Timestamp, pd.Timestamp]
     ) -> pd.DataFrame:
-        """PIT universe. ``spec`` 支持指数代码(如 ``000300.SH``)或 ``all``.
+        """PIT universe.
 
-        **按月采样后前填到每个交易日**, 而非逐日请求:
+        **指数成分**: 按月采样权重后前填到每个交易日（聚宽权重本身月频,
+        调样集中在少数日子；逐日请求无额外信息且极慢）。前填用
+        ``reindex(method='ffill')``，避免成分剔除后被列向 ffill「只进不出」。
 
-        - 聚宽的权重数据本身就是月度的(返回的 date 列是月末生效日), 按月取
-          **不丢信息**; 而逐交易日取会把 7 年区间变成约 1700 次请求;
-        - 成分股变动也集中在调样日(一年两次), 月度粒度足够。
-
-        权重已归一到 ``sum = 1.0``(聚宽原值是百分数且含舍入误差, 实测合计
-        约 100.003); ``all`` universe 无权重概念, ``weight`` 为 NaN。
+        **宽基池** ``main_a`` / ``hs_a``: 先取全市场并按代码剔板块，再按**每个
+        交易日**的 ``is_st`` 剔除 ST（ST 状态会变，不能只在月末快照上滤一次）。
         """
+        from qlab.data.universe import apply_board_filters, parse_broad_universe
+
         start, end = pd.Timestamp(date_range[0]), pd.Timestamp(date_range[1])
         sessions = self._sessions_upto_today(start, end)
         if len(sessions) == 0:
             return _empty_universe()
 
+        resolved = _resolve_universe_spec(spec)
+        broad = parse_broad_universe(resolved)
+
         frames = []
         for asof in _period_sample_dates(sessions):
-            frames.append(self._universe_at(spec, asof))
+            frames.append(self._universe_at(resolved, asof, broad=broad))
         snapshots = [f for f in frames if f is not None and len(f) > 0]
         if not snapshots:
             return _empty_universe()
 
-        # 按月快照前填到每个交易日。
-        #
-        # 必须用 ``reindex(method="ffill")`` 而**不能**用 ``reindex(...).ffill()``:
-        #   reindex(method="ffill") —— 为新增日期找"最近的更早整行", 已有行的
-        #                            NaN 保持 NaN
-        #   .ffill()              —— 逐列向下填充, **会跳过 NaN**
-        # 成分股被剔除时, 它在后续采样点的值是 NaN; 用 .ffill() 会把剔除前的
-        # True 填过来, 造成 universe "只进不出"—— 股票池静默变大、且业绩虚高。
         panel = pd.concat(snapshots).sort_index()
         wide_in = panel["in_universe"].unstack("symbol").reindex(sessions, method="ffill")
         wide_w = panel["weight"].unstack("symbol").reindex(sessions, method="ffill")
@@ -959,21 +952,70 @@ class JQDataSource:
             }
         )
         out.index.names = ["date", "symbol"]
-        out = out[out["in_universe"].fillna(False).astype(bool)]
-        out["in_universe"] = out["in_universe"].astype(bool)
+        in_u = out["in_universe"]
+        if in_u.dtype != bool:
+            in_u = in_u.fillna(False).astype(bool)
+        out = out.loc[in_u].copy()
+        out["in_universe"] = True
+
+        # 宽基池：按日剔 ST（PIT）
+        if broad is not None:
+            _, exclude_st = broad
+            if exclude_st and not out.empty:
+                out = self._drop_st_from_universe(out)
+
         return out
 
-    def _universe_at(self, spec: str, asof: pd.Timestamp) -> pd.DataFrame | None:
-        """单个时点的 universe 快照.
+    def _drop_st_from_universe(self, uni: pd.DataFrame) -> pd.DataFrame:
+        """用日频 is_st 从宇宙中剔除当日 ST（缺值 fail-loud）."""
+        symbols = uni.index.get_level_values("symbol").unique().tolist()
+        dates = uni.index.get_level_values("date")
+        start, end = dates.min(), dates.max()
+        codes = _unique_jq_codes(symbols)
+        wide = self.cache.get_extras("is_st", codes, start, end)
+        if wide is None or (isinstance(wide, pd.DataFrame) and wide.empty):
+            raise DataUnavailableError(
+                f"构建剔 ST 宇宙需要 is_st，但 get_extras 无数据: {symbols[:10]}"
+            )
+        # 宽表可能是聚宽代码列 — 对齐到 qlab symbol
+        wide = wide.copy()
+        wide.columns = [to_qlab_symbol(str(c)) for c in wide.columns]
+        wide.index = pd.DatetimeIndex(wide.index).normalize()
+        st = wide.reindex(index=pd.DatetimeIndex(uni.index.get_level_values("date").unique()))
+        try:
+            st_long = st.stack(future_stack=True)
+        except TypeError:
+            st_long = st.stack()
+        st_long.index = st_long.index.set_names(["date", "symbol"])
+        flag = st_long.reindex(uni.index)
+        if flag.isna().any():
+            n_miss = int(flag.isna().sum())
+            raise DataUnavailableError(
+                f"剔 ST 宇宙时 is_st 覆盖不全: {n_miss} 个 (date, symbol) 缺值，拒绝静默放行。"
+            )
+        keep = ~flag.astype(bool)
+        out = uni.loc[keep].copy()
+        return out
 
-        ``spec`` 经 :func:`_resolve_universe_spec` 归一 —— 兼容
-        ``UniverseSpec`` 工厂方法生成的别名(``csi300`` / ``all_a:st=1,days=30``)。
-        """
+    def _universe_at(
+        self,
+        resolved: str,
+        asof: pd.Timestamp,
+        *,
+        broad: tuple[bool, bool] | None = None,
+    ) -> pd.DataFrame | None:
+        """单个时点的 universe 快照（``resolved`` 已经过 :func:`_resolve_universe_spec`）."""
+        from qlab.data.universe import apply_board_filters
+
         date_str = str(asof.date())
-        resolved = _resolve_universe_spec(spec)
-        if resolved == "all":
+        if resolved in ("all", "main_a", "hs_a"):
             info = self.cache.get_all_securities(date_str, types=["stock"])
             members = [to_qlab_symbol(str(c)) for c in info.index]
+            if broad is not None:
+                exclude_star, _exclude_st = broad
+                members = apply_board_filters(
+                    members, exclude_bj=True, exclude_star=exclude_star
+                )
             weights = [np.nan] * len(members)
         else:
             w = self.cache.get_index_weights(to_jq_code(resolved), date_str)
@@ -982,7 +1024,6 @@ class JQDataSource:
             members = [to_qlab_symbol(str(c)) for c in w.index]
             total = float(w["weight"].sum())
             # 聚宽 weight 是百分数且含舍入误差 —— 归一到 sum=1.0
-            # (Universe 不变量要求 |sum-1| < 1e-3, 单纯 /100 在误差较大时会被拒)
             weights = (
                 (w["weight"].astype(float) / total).tolist()
                 if total > 0

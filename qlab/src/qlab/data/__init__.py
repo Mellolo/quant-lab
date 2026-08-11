@@ -18,7 +18,13 @@ from qlab.data.store import (
     ParquetBarStore,
     ParquetShardedBarStore,
 )
-from qlab.data.universe import Universe, UniverseSpec, filter_by_dollar_volume
+from qlab.data.universe import (
+    Universe,
+    UniverseSpec,
+    apply_board_filters,
+    is_bj_symbol,
+    is_star_symbol,
+)
 
 __all__ = [
     "DataLayer",
@@ -31,5 +37,7 @@ __all__ = [
     "ParquetShardedBarStore",
     "Universe",
     "UniverseSpec",
-    "filter_by_dollar_volume",
+    "apply_board_filters",
+    "is_bj_symbol",
+    "is_star_symbol",
 ]

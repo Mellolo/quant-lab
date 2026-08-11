@@ -70,70 +70,82 @@
 
 ## 2. labeling 模块
 
-### 2.1 数据流概述
+### 2.1 数据流概述（现行）
 
 ```
-价格 + features → EventSampler → Event → TripleBarrier → Label
-                                              │
-                                              └→ (meta-labeling 模式时) MetaLabel
+确认日采样器 ──┐
+               ├→ SampleSpec(entry_at) → 入场日 Event + Label (TB)
+网格每日确认 ──┘              │
+                              │ event_entry_timing
+                              ▼
+              build_feature_matrix(同 entry_timing) → attach_features_to_events
+                              │
+                              ▼
+              build_labeled_samples  →  (events, labels, X)   ← 研究唯一推荐入口
 ```
 
-### 2.2 Event Schema（再述 §3.10）
+防未来函数细则见 [`sampling-pit.md`](./sampling-pit.md)。
+
+### 2.2 采样合约
+
+- **确认日**：`EventSampler.sample_per_symbol` / `daily_event_pairs` 只吐条件成立日（网格=每日皆确认）。
+- **入场**：`SampleSpec.entry_at`
+  - `next_open`（默认）：下一交易日开盘
+  - `confirm_close`：确认日收盘
+- **出场**：`ExitSettings(pt, sl, vertical_days)` 经典三重屏障；Trail/前高等见 `exit.py` 扩展点（未实现）。
+- **拼因子**：`build_labeled_samples(...)`；禁止裸确认日 + `entry_timing=open` 手拼。
+
+`spec.event_entry_timing` 由 `entry_at` 导出，必须与特征矩阵一致。
+
+### 2.3 Event Schema（再述 §3.10）
 
 | 字段 | 来源 |
 |---|---|
-| `event_start` (index) | EventSampler 输出的触发时刻 |
+| `event_start` (index) | **入场日**（非裸确认日） |
 | `symbol` | 标的代码 |
-| `t1` | 垂直屏障时刻；用 `Calendar.next_trading_day(event_start, t1_days)` 计算 |
-| `target` | 屏障宽度基准。推荐用 `daily_ewm_vol`（在 `labeling/thresholds.py`） |
-| `side` | 主模型方向 +1/-1，或 NaN 表示让 ML 学方向 |
+| `t1` | 垂直屏障；`ExitSettings.vertical_days` / `Calendar.next_trading_day` |
+| `target` | 屏障宽度基准（推荐波动） |
+| `side` | 主模型方向，或 NaN |
+| `entry_timing` | `open` / `close`（与特征矩阵对齐） |
+| `event_id` | 多标的下稳定主键 |
 
-**不变量**：`target > 0`；`t1 > event_start`（如非 NaT）。
+**不变量**：`target > 0`；`t1 > event_start`（如非 NaT）；`entry_timing ∈ {open, close}`。
 
-`labeling.events.to_event_dataframe(pairs, target, t1_days, side, calendar)` 是把 CUSUMFilter 的 `(timestamp, symbol)` 对扩展为 Event schema 的标准入口；它内部自动调 `validate_schema(SCHEMA_EVENT)`。
+底层仍可用 `to_event_dataframe`；研究路径应经 `SampleSpec` / `build_labeled_samples`。
 
-### 2.3 EventSampler Protocol
+### 2.4 EventSampler
 
 ```python
 class EventSampler(ABC):
-    @abstractmethod
-    def sample(self, prices: pd.DataFrame | pd.Series) -> pd.DatetimeIndex: ...
+    def sample(self, prices) -> DatetimeIndex: ...
+    def sample_per_symbol(self, prices) -> DataFrame  # timestamp, symbol = 确认日
 ```
 
-唯一现成实现：`CUSUMFilter(h, expected=None)`（书 Ch2 §2.5）。多 symbol 时用 `sample_per_symbol(prices_wide) -> DataFrame[timestamp, symbol]`。
+实现包括 `CUSUMFilter`、`VolumeCUSUMFilter`、`RunSampler`、`NewHighBreakoutSampler` 等。  
+扩展时保持「只返回确认日」语义，入场映射留给 `SampleSpec`。
 
-**扩展原则**：未来加入 Bollinger / RSI / 事件驱动型采样器时，必须实现 `sample` 并保持"返回触发时间戳"的语义。
-
-### 2.4 TripleBarrier 接口
+### 2.5 TripleBarrier / ExitSettings
 
 ```python
-TripleBarrier(pt: float, sl: float)
-label_events(events, close, barrier, *, num_threads=1, is_meta_labeling=None) -> Label
+ExitSettings(pt, sl, vertical_days)  # 研究默认 3, 1, 20
+label_events(events, prices, barrier, ...) -> Label
 ```
 
-- `pt`：止盈倍数（× target）；0 表示无上屏障
-- `sl`：止损倍数（× target）；0 表示无下屏障
-- `is_meta_labeling`：`None` 时自动判断——`events` 含非空 `side` → meta-labeling
-- 输出 schema 是 `SCHEMA_LABEL`，在 `label_events` 末尾强制校验
-
-**`bin` 语义**：
-
-| 模式 | bin 取值 | 含义 |
+| 模式 | bin | 含义 |
 |---|---|---|
-| 普通（side=None） | -1 / 0 / +1 | 触下 / 持仓到期 / 触上 |
-| meta-labeling | 0 / 1 | 跟主模型方向是否盈利 |
+| 普通（side=None） | -1 / 0 / +1 | 触下 / 垂直 / 触上 |
+| meta-labeling | 0 / 1 | 是否跟对主模型方向 |
 
-### 2.5 A 股注意
+### 2.6 A 股注意
 
-- **停牌穿仓**：屏障期内停牌的样本，当前实现把 `touch_type` 标为 `'no_data'`、`bin=0`。下游训练时应过滤这类（`labels[labels.touch_type != 'no_data']`）。
-- **T+1 限制**：`event_start` 若是当日收盘，最早 `event_start + 1 trading day` 才能下单。`t1` 用 `Calendar.next_trading_day` 计算可天然规避此问题，**不要用 `pd.Timedelta(days=N)`**。
-- **涨停板封死**：`event_start` 若在涨停日，应在 EventSampler 阶段就过滤（通过 `FeatureMatrix.mask`），不应进入 Event。
+- **停牌**：`touch_type='no_data'` 默认 `drop_no_data=True` 剔除。
+- **入场日**：默认次日开盘，避免确认日收盘信息漏进开盘决策。
+- **涨跌停**：可用 `FeatureMatrix.mask` 在拼样本后过滤。
 
-### 2.6 未来扩展
+### 2.7 未来扩展
 
-- `BollingerBandSampler`：用波动率通道触发
-- `EarningsSurpriseSampler`：用 Fundamental `forecast_change_pct_max - actual` 触发
-- `to_event_dataframe` 增加 per-symbol target 的便捷接口
+- 出场：移动止盈、前高/结构位、均线跌破（见 `exit.py`）
+- 采样器：更多事件过滤器（仍只吐确认日）
 
 ---
 

@@ -1,8 +1,14 @@
 """Universe — PIT 正确的成分股查询.
 
 设计：
-- UniverseSpec 是声明（指数代码 / 自定义列表 / 全 A 等）
-- Universe 是查询接口，按日返回成分股集合
+- :class:`UniverseSpec` 是声明（指数 / 沪深宽基池）
+- :class:`Universe` 是按日查询的成分集合
+
+指数成分随调样变化：数据源按采样日取权重并前填到每个交易日
+（见 JQ 实现），禁止「取今天成分用到全部历史」。
+
+成交额等可交易性门槛属于**采样门**（如 ``liquidity_top_n_mask``），
+不在宇宙层表达。
 """
 
 from __future__ import annotations
@@ -14,12 +20,32 @@ import pandas as pd
 
 from qlab.core.exceptions import UniverseError
 
+# 公开宇宙名 → 说明（也用于解析）
+_UNIVERSE_DOC = {
+    "csi300": "沪深300 指数成分（PIT）",
+    "csi500": "中证500 指数成分（PIT）",
+    "csi800": "中证800 指数成分（PIT）",
+    "csi1000": "中证1000 指数成分（PIT）",
+    "main_a": "沪深A股 − 北交所 − 科创板 − ST（PIT）",
+    "hs_a": "沪深A股 − 北交所 − ST（保留科创/创业板，PIT）",
+}
+
 
 @dataclass(frozen=True)
 class UniverseSpec:
-    """Universe 规范声明."""
+    """Universe 规范声明.
 
-    name: str  # 'csi300' / 'csi500' / 'csi800' / 'csi1000' / 'all_a' / 'all_a_raw' / 'custom:xxx'
+    宽基池
+    ------
+    - ``main_a``: 全市场 − 北交所 − 科创板(688) − ST
+    - ``hs_a``: 全市场 − 北交所 − ST（含科创板、创业板）
+
+    指数池（成分随调样日变化，PIT）
+    --------------------------------
+    ``csi300`` / ``csi500`` / ``csi800`` / ``csi1000``
+    """
+
+    name: str
 
     @classmethod
     def csi300(cls) -> UniverseSpec:
@@ -38,13 +64,66 @@ class UniverseSpec:
         return cls("csi1000")
 
     @classmethod
-    def all_a(cls, exclude_st: bool = True, min_listing_days: int = 30) -> UniverseSpec:
-        suffix = f"st={int(exclude_st)},days={min_listing_days}"
-        return cls(f"all_a:{suffix}")
+    def main_a(cls) -> UniverseSpec:
+        """全市场 − 北交所 − 科创板 − ST."""
+        return cls("main_a")
 
     @classmethod
-    def custom(cls, name: str) -> UniverseSpec:
-        return cls(f"custom:{name}")
+    def hs_a(cls) -> UniverseSpec:
+        """全市场 − 北交所 − ST（保留科创板）."""
+        return cls("hs_a")
+
+    def describe(self) -> str:
+        return _UNIVERSE_DOC.get(self.name, self.name)
+
+
+def is_bj_symbol(symbol: str) -> bool:
+    """北交所：``.BJ`` 或代码段 43/83/87/92."""
+    s = str(symbol).upper()
+    if s.endswith(".BJ"):
+        return True
+    code = s.split(".", 1)[0]
+    return code.startswith(("43", "83", "87", "92"))
+
+
+def is_star_symbol(symbol: str) -> bool:
+    """科创板：沪市 ``688xxx``."""
+    s = str(symbol).upper()
+    code, _, exch = s.partition(".")
+    if exch and exch not in ("SH", "XSHG"):
+        return False
+    return code.startswith("688")
+
+
+def apply_board_filters(
+    symbols: list[str],
+    *,
+    exclude_bj: bool = True,
+    exclude_star: bool = False,
+) -> list[str]:
+    """按代码规则剔除板块（与日期无关）."""
+    out = []
+    for sym in symbols:
+        if exclude_bj and is_bj_symbol(sym):
+            continue
+        if exclude_star and is_star_symbol(sym):
+            continue
+        out.append(sym)
+    return out
+
+
+def parse_broad_universe(spec: str) -> tuple[bool, bool] | None:
+    """若是宽基池，返回 ``(exclude_star, exclude_st)``；否则 None.
+
+    - ``main_a`` → 剔科创、剔 ST
+    - ``hs_a`` → 保留科创、剔 ST
+    """
+    head = str(spec).strip().split(":", 1)[0].lower()
+    if head == "main_a":
+        return True, True
+    if head == "hs_a":
+        return False, True
+    return None
 
 
 class Universe:
@@ -114,7 +193,7 @@ class Universe:
         参数
         ----
         mask : MultiIndex(date, symbol) 的 bool Series；True = 保留。
-        name_suffix : 追加到 spec.name（便于审计），如 ``'|amt20d'``。
+        name_suffix : 追加到 spec.name（便于审计），如 ``'|custom'``。
         """
         if not isinstance(mask.index, pd.MultiIndex):
             raise UniverseError("mask 必须是 MultiIndex(date, symbol)")
@@ -122,7 +201,6 @@ class Universe:
         keep = self._df["in_universe"].astype(bool) & m
         out = self._df.copy()
         out["in_universe"] = keep
-        # 权重：剔出的置 NaN，在池内重新归一（若原权重可用）
         if "weight" in out.columns:
             w = out["weight"].where(keep)
             sums = w.groupby(level="date").transform("sum")
@@ -134,42 +212,7 @@ class Universe:
     def __repr__(self) -> str:
         start, end = self.date_range()
         n_symbols = len(self.all_symbols())
-        return (f"Universe(spec={self._spec.name}, "
-                f"dates={start.date()}~{end.date()}, n_symbols={n_symbols})")
-
-
-def filter_by_dollar_volume(
-    universe: Universe,
-    daily: pd.DataFrame,
-    *,
-    min_avg_amount: float = 5.0e7,
-    lookback_days: int = 20,
-) -> Universe:
-    """成交额宇宙过滤 — trading-books 07/12 流动性门槛.
-
-    保留滚动 ``lookback_days`` 日均成交额（``amount``，元）≥ ``min_avg_amount``
-    的 (date, symbol)。默认 20 日均额 ≥ 5e7（约 5000 万）。
-
-    使用截至当日的 amount（``today_close`` 语义）。开盘入场时请用
-    T 日过滤结果服务 T+1 开盘，或先对 mask ``groupby(symbol).shift(1)``。
-
-    参数
-    ----
-    universe : 基础宇宙
-    daily : DailyBar（至少含 ``amount``），index=(date, symbol)
-    min_avg_amount : 日均成交额下限（元）
-    lookback_days : 滚动窗口
-    """
-    if "amount" not in daily.columns:
-        raise UniverseError("filter_by_dollar_volume 需要 daily 含 amount 列")
-    if lookback_days < 1:
-        raise ValueError("lookback_days 必须 >= 1")
-
-    amt = daily["amount"].astype("float64").unstack("symbol")
-    avg = amt.rolling(lookback_days, min_periods=max(1, lookback_days // 2)).mean()
-    mask = (avg >= float(min_avg_amount)).stack(future_stack=True)
-    mask.index.names = ["date", "symbol"]
-    return universe.intersect(
-        mask,
-        name_suffix=f"|amt{lookback_days}d>={min_avg_amount:.0e}",
-    )
+        return (
+            f"Universe(spec={self._spec.name}, "
+            f"dates={start.date()}~{end.date()}, n_symbols={n_symbols})"
+        )

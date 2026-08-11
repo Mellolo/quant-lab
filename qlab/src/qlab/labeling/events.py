@@ -15,18 +15,41 @@ from qlab.core.schema import SCHEMA_EVENT, validate_schema
 class EventSampler(ABC):
     """事件采样器基类：产出**确认日**（该日收盘后触发条件成立）.
 
-    不负责入场。合约层 :class:`~qlab.labeling.sample_spec.SampleSpec`
-    默认把确认日映射到**下一交易日开盘**；也可 ``entry_at=confirm_close``。
+    不负责入场。勿把 ``sample_per_symbol`` 的 timestamp 直接当开盘入场日。
+    研究路径请用 :class:`~qlab.labeling.sample_spec.SampleSpec` 或
+    :func:`~qlab.labeling.sample_frame.build_labeled_samples`。
+
+    子类只需实现 :meth:`_sample_single`；``sample`` / ``sample_per_symbol``
+    由基类按列展开，避免各采样器重复样板代码。
     """
 
+    def sample(self, data: pd.DataFrame | pd.Series) -> pd.DatetimeIndex:
+        """返回事件时间戳（多 symbol 时合并去重）."""
+        if isinstance(data, pd.Series):
+            return self._sample_single(data)
+        all_events: set[pd.Timestamp] = set()
+        for col in data.columns:
+            all_events.update(self._sample_single(data[col]).tolist())
+        return pd.DatetimeIndex(sorted(all_events))
+
+    def sample_per_symbol(self, data: pd.DataFrame) -> pd.DataFrame:
+        """采样并返回 (timestamp, symbol) 对."""
+        rows = []
+        for col in data.columns:
+            for ts in self._sample_single(data[col]):
+                rows.append({"timestamp": ts, "symbol": col})
+        if not rows:
+            return pd.DataFrame(columns=["timestamp", "symbol"])
+        return pd.DataFrame(rows)
+
     @abstractmethod
-    def sample(self, prices: pd.DataFrame | pd.Series) -> pd.DatetimeIndex:
-        """返回事件时间戳."""
+    def _sample_single(self, series: pd.Series) -> pd.DatetimeIndex:
+        """单标的确认日序列."""
         ...
 
 
 class CUSUMFilter(EventSampler):
-    """对称 CUSUM Filter — 书 Ch2 Snippet 2.4.
+    """对称 CUSUM Filter — 书 Ch2 Snippet 2.4（**主栈可选触发**）.
 
     累计偏离超过阈值 h 时触发事件，并重置累加。
     多 symbol 时，按 symbol 分别计算后合并去重。
@@ -39,38 +62,6 @@ class CUSUMFilter(EventSampler):
         """
         self.h = h
         self.expected = expected
-
-    def sample(self, prices: pd.DataFrame | pd.Series) -> pd.DatetimeIndex:
-        """采样.
-
-        参数
-        ----
-        prices : 若是 Series，indexed by date（单 symbol）；
-                 若是 DataFrame，columns=symbols, index=date。
-
-        返回
-        ----
-        所有触发事件的时间戳（多 symbol 时合并去重）。
-        """
-        if isinstance(prices, pd.Series):
-            return self._sample_single(prices)
-        # DataFrame: 按 symbol 分别采样
-        all_events: set[pd.Timestamp] = set()
-        for col in prices.columns:
-            events = self._sample_single(prices[col])
-            all_events.update(events.tolist())
-        return pd.DatetimeIndex(sorted(all_events))
-
-    def sample_per_symbol(self, prices: pd.DataFrame) -> pd.DataFrame:
-        """采样并返回 (timestamp, symbol) 对."""
-        rows = []
-        for col in prices.columns:
-            events = self._sample_single(prices[col])
-            for ts in events:
-                rows.append({"timestamp": ts, "symbol": col})
-        if not rows:
-            return pd.DataFrame(columns=["timestamp", "symbol"])
-        return pd.DataFrame(rows)
 
     def _sample_single(self, series: pd.Series) -> pd.DatetimeIndex:
         if series.empty:
@@ -104,32 +95,15 @@ class CUSUMFilter(EventSampler):
 
 
 class VolumeCUSUMFilter(EventSampler):
-    """成交量 CUSUM Filter — 检测量能突变.
+    """成交量 CUSUM Filter — 检测量能突变（**实验/辅触发**，非主栈默认）.
 
     对 log(volume) 的变化率做对称 CUSUM，量能突然放大或缩小时触发事件。
+    主栈更常用 :func:`~qlab.labeling.sample_masks.volume_confirm_mask`
+    叠在价格触发器上。
     """
 
     def __init__(self, h: float | pd.Series):
         self.h = h
-
-    def sample(self, volume: pd.DataFrame | pd.Series) -> pd.DatetimeIndex:
-        if isinstance(volume, pd.Series):
-            return self._sample_single(volume)
-        all_events: set[pd.Timestamp] = set()
-        for col in volume.columns:
-            events = self._sample_single(volume[col])
-            all_events.update(events.tolist())
-        return pd.DatetimeIndex(sorted(all_events))
-
-    def sample_per_symbol(self, volume: pd.DataFrame) -> pd.DataFrame:
-        rows = []
-        for col in volume.columns:
-            events = self._sample_single(volume[col])
-            for ts in events:
-                rows.append({"timestamp": ts, "symbol": col})
-        if not rows:
-            return pd.DataFrame(columns=["timestamp", "symbol"])
-        return pd.DataFrame(rows)
 
     def _sample_single(self, series: pd.Series) -> pd.DatetimeIndex:
         if series.empty:
@@ -167,35 +141,17 @@ class VolumeCUSUMFilter(EventSampler):
 
 
 class RunSampler(EventSampler):
-    """连续同向收益采样器.
+    """连续同向收益采样器（**实验/辅触发**，非主栈默认）.
 
     监控连续正/负 log 收益率的天数（run length），
-    当 run 长度达到 min_run 时触发事件。
+    当 run 长度达到 min_run 时触发事件。与「领涨股」主叙事弱相关，
+    适合研究探针。
     """
 
     def __init__(self, min_run: int = 5):
         if min_run < 2:
             raise ValueError("min_run 必须 >= 2")
         self.min_run = min_run
-
-    def sample(self, prices: pd.DataFrame | pd.Series) -> pd.DatetimeIndex:
-        if isinstance(prices, pd.Series):
-            return self._sample_single(prices)
-        all_events: set[pd.Timestamp] = set()
-        for col in prices.columns:
-            events = self._sample_single(prices[col])
-            all_events.update(events.tolist())
-        return pd.DatetimeIndex(sorted(all_events))
-
-    def sample_per_symbol(self, prices: pd.DataFrame) -> pd.DataFrame:
-        rows = []
-        for col in prices.columns:
-            events = self._sample_single(prices[col])
-            for ts in events:
-                rows.append({"timestamp": ts, "symbol": col})
-        if not rows:
-            return pd.DataFrame(columns=["timestamp", "symbol"])
-        return pd.DataFrame(rows)
 
     def _sample_single(self, series: pd.Series) -> pd.DatetimeIndex:
         if series.empty:
@@ -224,7 +180,7 @@ class RunSampler(EventSampler):
 
 
 class EntropySampler(EventSampler):
-    """信息熵采样器 — 书 Ch18 思想.
+    """信息熵采样器 — 书 Ch18 思想（**实验/辅触发**，非主栈默认）.
 
     滑动窗口计算收益率分布的 Shannon entropy，
     entropy 变化超过阈值时触发事件（从有序变无序或反之）。
@@ -236,25 +192,6 @@ class EntropySampler(EventSampler):
         self.window = window
         self.n_bins = n_bins
         self.h = h
-
-    def sample(self, prices: pd.DataFrame | pd.Series) -> pd.DatetimeIndex:
-        if isinstance(prices, pd.Series):
-            return self._sample_single(prices)
-        all_events: set[pd.Timestamp] = set()
-        for col in prices.columns:
-            events = self._sample_single(prices[col])
-            all_events.update(events.tolist())
-        return pd.DatetimeIndex(sorted(all_events))
-
-    def sample_per_symbol(self, prices: pd.DataFrame) -> pd.DataFrame:
-        rows = []
-        for col in prices.columns:
-            events = self._sample_single(prices[col])
-            for ts in events:
-                rows.append({"timestamp": ts, "symbol": col})
-        if not rows:
-            return pd.DataFrame(columns=["timestamp", "symbol"])
-        return pd.DataFrame(rows)
 
     def _sample_single(self, series: pd.Series) -> pd.DatetimeIndex:
         if series.empty:
@@ -290,7 +227,7 @@ class EntropySampler(EventSampler):
         return -float(np.sum(probs * np.log2(probs)))
 
 class NewHighBreakoutSampler(EventSampler):
-    """N 日收盘新高突破采样器（trading-books 15/12）.
+    """N 日收盘新高突破采样器（trading-books 15/12）（**主栈推荐触发**）.
 
     规则
     ----
@@ -300,7 +237,8 @@ class NewHighBreakoutSampler(EventSampler):
       （默认次日开盘）
 
     备注: 全市场退出网格显示 ``window=60`` 显著负期望，现行目录只用短窗
-    （默认 20）作候选池，勿裸用长窗新高作进场采样。
+    （默认 20）作候选池，勿裸用长窗新高作进场采样。质量靠采样门
+    （Stage2 / RS / 量能等）叠加，而非加长 window。
     """
 
     def __init__(
@@ -314,25 +252,6 @@ class NewHighBreakoutSampler(EventSampler):
             raise ValueError("cooldown_days 必须 >= 0")
         self.window = window
         self.cooldown_days = cooldown_days
-
-    def sample(self, prices: pd.DataFrame | pd.Series) -> pd.DatetimeIndex:
-        if isinstance(prices, pd.Series):
-            return self._sample_single(prices)
-        all_events: set[pd.Timestamp] = set()
-        for col in prices.columns:
-            events = self._sample_single(prices[col])
-            all_events.update(events.tolist())
-        return pd.DatetimeIndex(sorted(all_events))
-
-    def sample_per_symbol(self, prices: pd.DataFrame) -> pd.DataFrame:
-        rows = []
-        for col in prices.columns:
-            events = self._sample_single(prices[col])
-            for ts in events:
-                rows.append({"timestamp": ts, "symbol": col})
-        if not rows:
-            return pd.DataFrame(columns=["timestamp", "symbol"])
-        return pd.DataFrame(rows)
 
     def _sample_single(self, series: pd.Series) -> pd.DatetimeIndex:
         close = series.dropna()
@@ -358,11 +277,15 @@ class NewHighBreakoutSampler(EventSampler):
 
 
 class HMMTrendSampler(EventSampler):
-    """因果 HMM 趋势状态采样器.
+    """因果 HMM 趋势状态采样器（**实验/辅触发**，非主栈默认）.
 
     用滚动窗口在**历史数据**上拟合一个 2 状态高斯 HMM，推断当日属于
     高波动趋势态的后验概率；概率从低于阈值升到高于阈值时触发事件。
     全程只用截至当日的数据，满足 PIT。
+
+    与 :func:`~qlab.labeling.sample_masks.stage2_mask` /
+    :func:`~qlab.labeling.sample_masks.relative_strength_mask` 重叠大且更贵，
+    适合专题研究，不作为默认触发。
 
     实现要点
     --------
@@ -391,25 +314,6 @@ class HMMTrendSampler(EventSampler):
         self.cooldown_days = cooldown_days
         self.n_iter = n_iter
         self.random_state = random_state
-
-    def sample(self, prices: pd.DataFrame | pd.Series) -> pd.DatetimeIndex:
-        if isinstance(prices, pd.Series):
-            return self._sample_single(prices)
-        all_events: set[pd.Timestamp] = set()
-        for col in prices.columns:
-            events = self._sample_single(prices[col])
-            all_events.update(events.tolist())
-        return pd.DatetimeIndex(sorted(all_events))
-
-    def sample_per_symbol(self, prices: pd.DataFrame) -> pd.DataFrame:
-        rows = []
-        for col in prices.columns:
-            events = self._sample_single(prices[col])
-            for ts in events:
-                rows.append({"timestamp": ts, "symbol": col})
-        if not rows:
-            return pd.DataFrame(columns=["timestamp", "symbol"])
-        return pd.DataFrame(rows)
 
     def _sample_single(self, series: pd.Series) -> pd.DatetimeIndex:
         from hmmlearn.hmm import GaussianHMM  # 延迟导入, 保持 qlab 无硬依赖
@@ -609,9 +513,10 @@ def daily_event_pairs(
     symbols: list[str],
     dates: pd.DatetimeIndex,
 ) -> pd.DataFrame:
-    """日频网格：每个交易日 × 每个标的 一对确认日 (timestamp, symbol).
+    """日频网格：每个交易日 × 每个标的 一对确认日 (timestamp, symbol)（**主栈可选**）.
 
-    「每一天都是确认日」。入场由 :class:`~qlab.labeling.sample_spec.SampleSpec`
+    「每一天都是确认日」。适合横截面动量研究：用采样门收窄宇宙后排序。
+    入场由 :class:`~qlab.labeling.sample_spec.SampleSpec`
     决定（默认次日开盘；可选确认日收盘）。
     """
     dates = pd.DatetimeIndex(dates).normalize().unique().sort_values()
@@ -620,6 +525,7 @@ def daily_event_pairs(
         return pd.DataFrame(columns=["timestamp", "symbol"])
     idx = pd.MultiIndex.from_product([dates, syms], names=["timestamp", "symbol"])
     return idx.to_frame(index=False)
+
 
 
 def filter_pairs(

@@ -245,12 +245,14 @@ date        symbol     close   close_raw  adj_factor  volume   is_suspended  is_
 
 | 名称 | 含义 |
 |---|---|
-| `'csi300'` | 沪深 300 |
-| `'csi500'` | 中证 500 |
-| `'csi800'` | 中证 800 |
-| `'csi1000'` | 中证 1000 |
-| `'all_a'` | 全 A（剔除 ST、退市、上市未满 N 天） |
-| `'all_a_raw'` | 全 A 不过滤 |
+| `'csi300'` | 沪深 300（PIT 成分） |
+| `'csi500'` | 中证 500（PIT 成分） |
+| `'csi800'` | 中证 800（PIT 成分） |
+| `'csi1000'` | 中证 1000（PIT 成分） |
+| `'main_a'` | 沪深 A − 北交所 − 科创板 − ST（ST 按日 PIT） |
+| `'hs_a'` | 沪深 A − 北交所 − ST（保留科创/创业板；ST 按日 PIT） |
+
+成交额等可交易性门槛属于采样门，不在宇宙层。
 
 **不变量**：
 
@@ -382,7 +384,7 @@ date        symbol     close   close_raw  adj_factor  volume   is_suspended  is_
 | `requires_intraday` | bool | 是否需要日内数据 |
 | `intraday_freq` | Freq \| None | 若需要日内，所需频率 |
 | `dependencies` | tuple[str, ...] | 依赖的其他特征名（用于拓扑序计算） |
-| `universe_filter` | str | 仅在此 universe 内计算（如 `'all_a'`） |
+| `universe_filter` | str | 仅在此 universe 内计算（如 `'main_a'`） |
 | `output_dtype` | str | 输出数据类型（默认 `'float64'`） |
 | `output_range` | tuple \| None | 输出值的合理范围（用于异常检测，可选） |
 | `description` | str | 文档字符串，说明因子含义、参考文献 |

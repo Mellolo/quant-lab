@@ -49,17 +49,23 @@ class FakeDataSource:
         self._daily_cache: dict[str, pd.DataFrame] = {}
 
     def _generate_symbol_list(self) -> list[str]:
-        """生成随机但确定的股票代码列表."""
+        """生成随机但确定的股票代码列表（含少量科创板 688，便于宇宙过滤自测）."""
         rng = np.random.default_rng(self.seed)
         symbols = []
-        for _i in range(self.n_symbols):
+        n_star = max(1, self.n_symbols // 10)
+        for i in range(self.n_symbols):
+            if i < n_star:
+                code = f"688{rng.integers(0, 1000):03d}"
+                symbols.append(f"{code}.SH")
+                continue
             exchange = rng.choice(["SH", "SZ"])
             if exchange == "SH":
-                code = f"6{rng.integers(0, 100000):05d}"
+                # 避开 688，避免与科创板测试码冲突
+                code = f"60{rng.integers(0, 10000):04d}"
             else:
                 code = f"00{rng.integers(0, 10000):04d}"
             symbols.append(f"{code}.{exchange}")
-        return sorted(set(symbols))[:self.n_symbols]
+        return sorted(set(symbols))[: self.n_symbols]
 
     @property
     def all_symbols(self) -> list[str]:
@@ -287,22 +293,52 @@ class FakeDataSource:
 
     def fetch_universe(self, spec: str,
                        date_range: tuple[pd.Timestamp, pd.Timestamp]) -> pd.DataFrame:
+        from qlab.data.universe import apply_board_filters, parse_broad_universe
+
         start, end = date_range
         dates = self._cal.trading_days(start, end)
+        head = str(spec).strip().split(":", 1)[0].lower()
+        if head in ("all_a", "all_a_raw"):
+            raise ValueError(
+                f"宇宙规格 {spec!r} 已移除。请改用 main_a 或 hs_a。"
+            )
 
-        # 简化：所有合成股票都在 universe 内
+        broad = parse_broad_universe(head)
         size_limit = {
-            "csi300": 30, "csi500": 50, "csi800": 80,
-            "csi1000": 100, "all_a": self.n_symbols,
+            "csi300": 30, "csi500": 50, "csi800": 80, "csi1000": 100,
         }
-        n_in = size_limit.get(spec.split(":")[0], self.n_symbols)
-        in_symbols = self._symbols[:n_in]
+        if broad is not None or head in ("all", "*", "main_a", "hs_a"):
+            candidates = list(self._symbols)
+            if broad is not None:
+                exclude_star, _ = broad
+                candidates = apply_board_filters(
+                    candidates, exclude_bj=True, exclude_star=exclude_star
+                )
+            in_symbols = candidates
+        else:
+            n_in = size_limit.get(head, self.n_symbols)
+            in_symbols = self._symbols[:n_in]
+
+        # 宽基剔 ST：用各标的日频 is_st（PIT）
+        st_by_sym: dict[str, pd.Series] = {}
+        if broad is not None:
+            for sym in in_symbols:
+                hist = self._get_or_generate_history(sym)
+                st = hist["is_st"]
+                if isinstance(st.index, pd.MultiIndex):
+                    st = st.droplevel("symbol")
+                st_by_sym[sym] = st
 
         rows = []
-        equal_weight = 1.0 / len(in_symbols)
+        equal_weight = 1.0 / max(len(in_symbols), 1)
+        in_set = set(in_symbols)
         for date in dates:
             for symbol in self._symbols:
-                in_u = symbol in in_symbols
+                in_u = symbol in in_set
+                if in_u and broad is not None:
+                    st_s = st_by_sym.get(symbol)
+                    if st_s is not None and date in st_s.index and bool(st_s.loc[date]):
+                        in_u = False
                 rows.append({
                     "date": date, "symbol": symbol,
                     "in_universe": in_u,
@@ -310,7 +346,8 @@ class FakeDataSource:
                 })
 
         df = pd.DataFrame(rows).set_index(["date", "symbol"]).sort_index()
-        return df
+        # 与 JQ 一致：只保留 in_universe=True 的行
+        return df[df["in_universe"]].copy()
 
     # ============================================================
     # fetch_corporate_actions

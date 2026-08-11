@@ -7,8 +7,11 @@
 
 拼样本时必须走 :func:`attach_features_to_events`：它强制
 ``FeatureMatrix.entry_timing == events.entry_timing``，不一致则抛
-:class:`~qlab.core.exceptions.PITViolationError` —— 不允许把未对齐、
-或入场时点不匹配的因子静默接到开盘/收盘样本上。
+:class:`~qlab.core.exceptions.PITViolationError`。
+
+研究代码请优先用 :func:`~qlab.labeling.sample_frame.build_labeled_samples`，
+由它强制 ``SampleSpec.event_entry_timing`` 与特征矩阵一致。
+详见 ``docs/design/sampling-pit.md``。
 """
 
 from __future__ import annotations
