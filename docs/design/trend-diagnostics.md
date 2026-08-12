@@ -20,11 +20,11 @@ OHLCV → price_panels → trend_panels / diagnose_trend → (feature | mask | n
 
 | 轴 | 取值 | 含义 |
 |----|------|------|
-| `direction` | -1 / 0 / +1 | 空 / 震荡 / 多（主：slow 结构；fast/slow 冲突则 0） |
-| `strength` | [0,1] | 滚动分位合成（smooth mom + 结构扩展比） |
+| `direction` | -1 / 0 / +1 | 空 / 震荡 / 多（主：slow；冲突不强制清零；弱市磨底→0；切换需确认） |
+| `strength` | [0,1] | 滚动分位 + 绝对动量（smooth mom + slow 扩展比） |
 | `phase` | early / mid / late / range | 初 / 中 / 末 / 区间 |
-| `quality` | [0,1] | R² + 回调健康度（+ 可选量能） |
-| `risk` | [0,1] | CHoCH / Stage3 / 贴高点滞涨 / 冲突 |
+| `quality` | [0,1] | R² + Kaufman 效率比 + 回调健康（+ 轻量能量） |
+| `risk` | [0,1] | slow CHoCH 粘滞 / Stage3 / 贴高点滞涨 / 冲突 |
 
 另有 `regime` 字符串便于人读；研究与门控优先用分轴。
 
@@ -38,10 +38,11 @@ OHLCV → price_panels → trend_panels / diagnose_trend → (feature | mask | n
 
 ## 相位规则（默认）
 
-- `range`：`direction=0`，或 Stage∈{1,3} 且 strength 低；fast/slow 冲突也倾向 range
-- `early`：有方向，本段 `bos_count≤1`，且（多头）距 120 日高仍远
-- `mid`：`bos_count≥2` 且 strength≥0.6
-- `late`：CHoCH，或 Stage 2→3，或贴 60 日高且 strength 较 20 日前回落
+- `range`：输出 `direction=0`（含 Stage1/4 弱市磨底抑制）
+- `mid`：有方向，且（slow `bos≥2` 且 strength 够，**或** strength+效率比显示主升/主跌）
+- `early`：有方向但尚未进入 mid
+- `late`：slow CHoCH 短粘滞（动量走强则清除），或 Stage 2→3，或贴高滞涨
+- fast/slow 冲突与 Stage 冲突只抬 `conflict`/`risk`，不再直接打成 range
 
 ## API
 

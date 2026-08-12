@@ -68,70 +68,54 @@ def _as_ohlcv_frame(ohlcv: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def _phase_from_rules(
-    *,
-    direction: float,
-    bos_count: float,
-    choch: float,
-    stage: float,
-    dist60: float,
-    dist120: float,
-    strength: float,
-    strength_delta: float,
-    stage_prev: float,
-) -> str:
-    if choch >= 1.0:
-        return "late"
-    if (
-        not np.isnan(stage)
-        and not np.isnan(stage_prev)
-        and stage_prev == 2.0
-        and stage == 3.0
-    ):
-        return "late"
-    if (
-        direction != 0
-        and not np.isnan(dist60)
-        and dist60 > -0.02
-        and not np.isnan(strength_delta)
-        and strength_delta < 0
-    ):
-        return "late"
-
-    if direction == 0:
-        return "range"
-    if not np.isnan(stage) and stage in (1.0, 3.0) and (
-        np.isnan(strength) or strength < 0.4
-    ):
-        return "range"
-
-    far_from_high = (
-        (direction > 0 and not np.isnan(dist120) and dist120 < -0.08)
-        or (direction < 0 and not np.isnan(dist120) and dist120 > -0.92)
+def _sticky_events(events: pd.DataFrame, hold: int) -> pd.DataFrame:
+    """事件发生后保持 ``hold`` 根（含当日），因果滚动 max."""
+    if hold <= 1:
+        return (events.fillna(0.0) >= 1.0).astype("float64")
+    return (
+        events.fillna(0.0)
+        .ge(1.0)
+        .astype("float64")
+        .rolling(hold, min_periods=1)
+        .max()
     )
-    # 空头「远离低点」用对称近似：多头用 dist_to_high；空头 phase early 用 bos<=1 为主
-    if direction != 0 and (np.isnan(bos_count) or bos_count <= 1) and (
-        far_from_high or direction < 0
-    ):
-        if direction > 0 and far_from_high:
-            return "early"
-        if direction < 0 and (np.isnan(bos_count) or bos_count <= 1):
-            return "early"
 
-    if (
-        direction != 0
-        and not np.isnan(bos_count)
-        and bos_count >= 2
-        and not np.isnan(strength)
-        and strength >= 0.6
-    ):
-        return "mid"
 
-    if direction != 0 and (np.isnan(bos_count) or bos_count <= 1):
-        return "early"
-    if direction != 0:
-        return "mid"
-    return "range"
+def _hysteresis_direction(raw: pd.DataFrame, hold: int = 3) -> pd.DataFrame:
+    """方向切换需连续 ``hold`` 根确认，抑制单日抖动."""
+    if hold <= 1:
+        return raw.fillna(0.0).astype("float64")
+    out = pd.DataFrame(0.0, index=raw.index, columns=raw.columns, dtype="float64")
+    for col in raw.columns:
+        r = raw[col].fillna(0.0).to_numpy(dtype=float)
+        o = np.empty_like(r)
+        cur = float(r[0]) if len(r) else 0.0
+        pending = cur
+        run = 0
+        for i, v in enumerate(r):
+            if v == cur:
+                pending = v
+                run = 0
+            else:
+                if v == pending:
+                    run += 1
+                else:
+                    pending = v
+                    run = 1
+                if run >= hold:
+                    cur = pending
+                    run = 0
+            o[i] = cur
+        out[col] = o
+    return out
+
+
+def _efficiency_ratio(close: pd.DataFrame, window: int = 20) -> pd.DataFrame:
+    """Kaufman ER：|净位移| / 路径长度，趋势越干净越接近 1."""
+    close = close.sort_index().astype(float)
+    net = close.diff(window).abs()
+    path = close.diff().abs().rolling(window, min_periods=max(5, window // 2)).sum()
+    return (net / path.replace(0.0, np.nan)).clip(0.0, 1.0)
 
 
 def _regime_label(direction: int, phase: str, strength: float, stage: float) -> str:
@@ -265,6 +249,8 @@ def trend_panels(
     stage_slope: int = 20,
     mom_window: int = 60,
     rank_window: int = 252,
+    dir_hold: int = 3,
+    late_hold: int = 5,
     include_xs_rank: bool = True,
 ) -> dict[str, pd.DataFrame]:
     """全市场趋势诊断宽表.
@@ -295,86 +281,115 @@ def trend_panels(
     mom = smooth_momentum_panel(close, window=mom_window)
     r2 = smooth_momentum_r2_panel(close, window=mom_window)
     strength_mom = rolling_rank_panel(mom, window=rank_window)
-    # ext_ratio → 分位；缺失填 0.5 中性
-    strength_ext = rolling_rank_panel(fast["ext_ratio"], window=rank_window)
-    strength = (strength_mom.fillna(0.5) + strength_ext.fillna(0.5)) / 2.0
+    # 扩展比用 slow 更稳；缺失填 0.5 中性
+    strength_ext = rolling_rank_panel(slow["ext_ratio"], window=rank_window)
+    # 绝对动量：把年化 smooth mom 压到 (0,1)，避免 strength 永远贴 0.5
+    mom_abs = (np.tanh(mom.fillna(0.0) / 0.35).abs() + 1.0) / 2.0
+    strength = (
+        0.55 * strength_mom.fillna(0.5)
+        + 0.25 * strength_ext.fillna(0.5)
+        + 0.20 * mom_abs
+    )
 
     dir_fast = fast["direction"]
     dir_slow = slow["direction"]
-    # 主方向：优先 slow；fast/slow 相反 → 0 并 conflict
-    direction = dir_slow.copy()
-    conflict = (dir_fast * dir_slow) < 0
-    direction = direction.where(~conflict, 0.0)
-    # slow 为 0 时回退 fast
-    direction = direction.where(dir_slow != 0, dir_fast)
+    # 主方向：slow；不再因 fast/slow 冲突清零（冲突只进 risk / conflict 旗）
+    direction_raw = dir_slow.copy()
+    mom_sign = np.sign(mom.fillna(0.0))
+    # slow=0 时：仅当 fast 与动量同向才回退，避免横盘噪声
+    fallback = (
+        (dir_slow == 0)
+        & (dir_fast != 0)
+        & (np.sign(dir_fast) == mom_sign)
+        & (strength_mom.fillna(0.5) > 0.55)
+    )
+    direction_raw = direction_raw.where(~fallback, dir_fast)
+    # 弱市磨底：仅当结构不稳（slow=0 或 fast/slow 冲突）才压成 0；稳定 slow 方向保留
+    struct_unstable = (dir_slow == 0) | ((dir_fast * dir_slow) < 0)
+    weak_grind = (
+        stage.isin([1.0, 4.0])
+        & (strength.fillna(0.5) < 0.50)
+        & struct_unstable
+    )
+    direction_raw = direction_raw.where(~weak_grind, 0.0)
+    direction = _hysteresis_direction(direction_raw, hold=dir_hold)
+
+    conflict_fs = (dir_fast * dir_slow) < 0
+    conflict_stage = ((direction > 0) & stage.eq(4.0)) | (
+        (direction < 0) & stage.eq(2.0)
+    )
+    conflict = conflict_fs | conflict_stage.fillna(False)
 
     strength_delta = strength - strength.shift(20)
     stage_prev = stage.shift(1)
+    eff = _efficiency_ratio(close, window=20)
 
-    # phase 逐元素规则（矩阵化）
-    choch = fast["choch"].fillna(0.0)
-    bos = fast["bos_count"]
+    # phase：用 slow 的 BOS/CHoCH；仅 slow CHoCH 短粘滞（fast 太噪，只进 risk）
+    choch_fast = fast["choch"].fillna(0.0)
+    choch_slow = slow["choch"].fillna(0.0)
+    choch_sticky = _sticky_events(choch_slow >= 1.0, hold=late_hold)
+    bos = slow["bos_count"]
+    # 动量仍在走强且当日无新 CHoCH → 清掉粘滞 late（保住主升 early/mid）
+    clear_late = (
+        (choch_slow < 1.0)
+        & (direction != 0)
+        & (strength.fillna(0) >= 0.58)
+        & (strength_delta.fillna(0) >= 0.0)
+    )
     late = (
-        (choch >= 1.0)
+        ((choch_sticky >= 1.0) & ~clear_late)
         | ((stage_prev == 2.0) & (stage == 3.0))
-        | ((direction != 0) & (dist60 > -0.02) & (strength_delta < 0))
-    )
-    range_mask = (direction == 0) | (
-        stage.isin([1.0, 3.0]) & (strength.fillna(0.0) < 0.4)
-    )
-    early = (
-        (direction != 0)
-        & (bos.fillna(0) <= 1)
-        & (
-            ((direction > 0) & (dist120 < -0.08))
-            | (direction < 0)
+        | (
+            (direction > 0)
+            & (dist60 > -0.01)
+            & (strength_delta < -0.08)
+            & stage.isin([2.0, 3.0])
         )
     )
-    mid = (
-        (direction != 0)
-        & (bos.fillna(0) >= 2)
-        & (strength.fillna(0) >= 0.6)
+    range_mask = direction == 0
+    # 急升段 bos 常被重置：用强度+路径效率识别 mid
+    mid = (direction != 0) & ~late & (
+        ((bos.fillna(0) >= 2) & (strength.fillna(0) >= 0.45))
+        | ((strength.fillna(0) >= 0.65) & (eff.fillna(0) >= 0.28))
+        | ((strength.fillna(0) >= 0.75) & (bos.fillna(0) >= 1))
     )
+    early = (direction != 0) & ~late & ~mid
     phase_code = pd.DataFrame(
         PHASE_CODE["range"], index=close.index, columns=close.columns, dtype="float64"
     )
-    phase_code = phase_code.mask(early & ~late & ~range_mask, float(PHASE_CODE["early"]))
-    phase_code = phase_code.mask(mid & ~late & ~range_mask, float(PHASE_CODE["mid"]))
-    # 未命中 mid/early 但有方向 → mid 弱默认 / early
-    weak_trend = (direction != 0) & ~late & ~range_mask & ~early & ~mid
-    phase_code = phase_code.mask(
-        weak_trend & (bos.fillna(0) <= 1), float(PHASE_CODE["early"])
-    )
-    phase_code = phase_code.mask(
-        weak_trend & (bos.fillna(0) > 1), float(PHASE_CODE["mid"])
-    )
+    phase_code = phase_code.mask(early & ~range_mask, float(PHASE_CODE["early"]))
+    phase_code = phase_code.mask(mid & ~range_mask, float(PHASE_CODE["mid"]))
     phase_code = phase_code.mask(range_mask & ~late, float(PHASE_CODE["range"]))
     phase_code = phase_code.mask(late, float(PHASE_CODE["late"]))
-    phase_code = phase_code.mask(conflict, float(PHASE_CODE["range"]))
 
-    # quality: R² + 回调不过深（pullback 越小越好，映射到 0~1）
-    pull = fast["pullback_pct"]
+    # quality: R² + 路径效率 + 回调健康（趋势干净时明显抬升）
+    pull = slow["pullback_pct"]
     pull_health = (1.0 - pull.clip(0.0, 0.5) / 0.5).clip(0.0, 1.0)
-    quality = (r2.fillna(0.5) + pull_health.fillna(0.5)) / 2.0
+    quality = (
+        0.40 * r2.fillna(0.35)
+        + 0.40 * eff.fillna(0.35)
+        + 0.20 * pull_health.fillna(0.5)
+    )
     if volume is not None:
         volume = volume.reindex_like(close).astype(float)
         up = close > close.shift(1)
-        # 20 日上涨日量占比
         up_vol = volume.where(up, 0.0)
         share = up_vol.rolling(20, min_periods=10).sum() / volume.rolling(
             20, min_periods=10
         ).sum().replace(0, np.nan)
-        quality = (quality + share.clip(0.0, 1.0).fillna(quality)) / 2.0
+        # 量能只做轻修正，避免再把 quality 拉回中性
+        quality = 0.85 * quality + 0.15 * share.clip(0.0, 1.0).fillna(quality)
 
-    # risk
+    # risk：fast CHoCH 当日加一点；slow 粘滞窗口加主风险
     risk = pd.DataFrame(0.0, index=close.index, columns=close.columns, dtype="float64")
-    risk = risk + 0.35 * (choch >= 1.0).astype(float)
+    risk = risk + 0.30 * (choch_sticky >= 1.0).astype(float)
+    risk = risk + 0.15 * (choch_fast >= 1.0).astype(float)
     risk = risk + 0.25 * ((stage == 3.0) | ((stage_prev == 2.0) & (stage == 3.0))).astype(
         float
     )
-    risk = risk + 0.20 * ((dist60 > -0.02) & (strength_delta < 0)).fillna(False).astype(
-        float
-    )
+    risk = risk + 0.20 * (
+        (direction > 0) & (dist60 > -0.01) & (strength_delta < -0.08)
+    ).fillna(False).astype(float)
     risk = risk + 0.20 * (strength_delta < -0.1).fillna(False).astype(float)
     risk = risk + 0.15 * conflict.astype(float)
     risk = risk.clip(0.0, 1.0)
@@ -389,13 +404,18 @@ def trend_panels(
         "risk": risk,
         "conflict": conflict.astype("float64"),
         "stage": stage,
-        "bos_count_fast": bos,
-        "choch_fast": choch,
+        "bos_count_fast": fast["bos_count"],
+        "bos_count_slow": bos,
+        "choch_fast": choch_fast,
+        "choch_slow": choch_slow,
+        "choch_sticky": choch_sticky,
         "dist_high_60": dist60,
         "dist_high_120": dist120,
         "smooth_mom": mom,
         "smooth_mom_r2": r2,
+        "efficiency": eff,
         "ext_ratio_fast": fast["ext_ratio"],
+        "ext_ratio_slow": slow["ext_ratio"],
         "strength_mom": strength_mom,
         "strength_ext": strength_ext,
     }

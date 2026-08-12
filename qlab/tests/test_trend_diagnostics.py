@@ -141,6 +141,22 @@ def test_swing_pivot_panels_alignment():
     assert sh["A"].iloc[13] == pytest.approx(5.0)
 
 
+def test_hysteresis_direction_requires_hold():
+    from qlab.diagnostics.trend import _hysteresis_direction
+
+    idx = _dates(10)
+    raw = pd.DataFrame(
+        {"S": [1, 1, 1, -1, -1, -1, 1, 1, 1, 1]},
+        index=idx,
+        dtype=float,
+    )
+    out = _hysteresis_direction(raw, hold=3)["S"]
+    # 第 4 根开始连续 -1，需满 3 根才切换 → 索引 5 才变成 -1
+    assert out.iloc[3] == 1.0
+    assert out.iloc[5] == -1.0
+    assert out.iloc[-1] == 1.0
+
+
 def test_bull_trend_mask_runs():
     from qlab.labeling.sample_masks import bull_trend_mask, trend_phase_mask
 
