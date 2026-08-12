@@ -25,7 +25,15 @@ from qlab.features.library.fundamental import PB, PE_TTM
 from qlab.features.library.intraday import IntradayVolSlope, MorningReturn
 from qlab.features.library.momentum import Momentum, MomentumResidual, SmoothMomentum
 from qlab.features.library.price import FractionalDiff, LogPrice, PriceMA
-from qlab.features.library.trend import DistToHigh, IsStage2, StageLabel
+from qlab.features.library.trend import (
+    DistToHigh,
+    IsStage2,
+    StageLabel,
+    TrendDirection,
+    TrendPhase,
+    TrendRisk,
+    TrendStrength,
+)
 from qlab.features.library.volatility import EwmVol, RealizedVol
 from qlab.features.library.volume import TurnoverRatio, VolumeRatio
 
@@ -42,6 +50,7 @@ __all__ = [
     "PE_TTM", "PB",
     # trend / stage
     "StageLabel", "IsStage2", "DistToHigh",
+    "TrendDirection", "TrendStrength", "TrendPhase", "TrendRisk",
     # intraday
     "IntradayVolSlope", "MorningReturn",
     # auction (today_open)

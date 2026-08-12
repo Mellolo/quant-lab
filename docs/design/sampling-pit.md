@@ -117,7 +117,8 @@ entry = spec.sample_pairs(close)   # 已映射
 |----|-----|
 | `tradable_hygiene_mask`（含可选 `min_close` / `min_avg_amount`） | 可交易卫生 |
 | `liquidity_top_n_mask` / `tradable_hygiene_mask(min_avg_amount=…)` | 流动性（采样门，非宇宙） |
-| `stage2_mask` | 趋势结构 |
+| `stage2_mask` | 趋势结构（Weinstein） |
+| `trend_phase_mask` / `bull_trend_mask` | 五轴趋势诊断相位/多头门（见 [trend-diagnostics.md](./trend-diagnostics.md)） |
 | `relative_strength_mask`（`method="smooth"` 或外部 `score=`） | 领涨 |
 | `near_high_mask` | 强势区（距高点带） |
 | `industry_rs_mask` ∩ `industry_leader_mask` | 板块对齐 |

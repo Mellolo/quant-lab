@@ -281,10 +281,14 @@ class MonthlyShardStore:
         has_index = isinstance(df, pd.DataFrame) and isinstance(
             df.index, pd.DatetimeIndex
         )
+        # 远程返回可能乱序; 非单调 DatetimeIndex 上 loc[lo:hi] 会 KeyError
+        if has_index and len(df) > 0:
+            df = df.sort_index()
+            df = df[~df.index.duplicated(keep="last")]
         for ym in months_between(covered_start, covered_end):
             if ym >= cur:
                 continue
-            if has_index:
+            if has_index and len(df) > 0:
                 lo, hi = month_bounds(ym)
                 part = df.loc[lo:hi]
             else:

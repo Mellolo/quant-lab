@@ -1,10 +1,11 @@
-"""趋势阶段 / 结构类特征 — Weinstein Stage、Trend Template 量化版."""
+"""趋势阶段 / 结构类特征 — Weinstein Stage、Trend Template、诊断五轴."""
 
 from __future__ import annotations
 
 import pandas as pd
 
 from qlab.core.price_panels import dist_to_high_panel, stage_panel
+from qlab.diagnostics.trend import trend_panels
 from qlab.features.base import DailyFeature, FeatureMeta
 from qlab.features.context import FeatureContext
 from qlab.features.registry import registry
@@ -85,3 +86,87 @@ registry.register(instance=StageLabel())
 registry.register(instance=IsStage2())
 registry.register(instance=DistToHigh(252))
 registry.register(instance=DistToHigh(60))
+
+
+def _trend_panel_field(
+    ctx: FeatureContext, field: str, *, lookback_days: int = 260
+) -> pd.Series:
+    """从日线宽表算 trend_panels 并取单字段 Series."""
+    df = ctx.daily(["close", "high", "low"], lookback_days=lookback_days)
+    close = df["close"].unstack("symbol")
+    high = df["high"].unstack("symbol")
+    low = df["low"].unstack("symbol")
+    panels = trend_panels(
+        close, high=high, low=low, volume=None, include_xs_rank=False
+    )
+    return panels[field].stack(future_stack=True)
+
+
+class TrendDirection(DailyFeature):
+    """趋势方向 ∈ {-1, 0, +1}（诊断模块汇总方向）."""
+
+    def __init__(self):
+        self.meta = FeatureMeta(
+            name="trend_direction",
+            version="1.0",
+            lookback_days=260,
+            available_at="today_close",
+            description="市场结构+Stage 汇总方向（diagnostics.trend）",
+        )
+
+    def compute(self, ctx: FeatureContext) -> pd.Series:
+        return _trend_panel_field(ctx, "direction").rename(self.meta.name)
+
+
+class TrendStrength(DailyFeature):
+    """趋势强度 ∈ [0,1]（滚动分位合成）."""
+
+    def __init__(self):
+        self.meta = FeatureMeta(
+            name="trend_strength",
+            version="1.0",
+            lookback_days=260,
+            available_at="today_close",
+            description="smooth mom + 结构扩展比的滚动分位强度",
+        )
+
+    def compute(self, ctx: FeatureContext) -> pd.Series:
+        return _trend_panel_field(ctx, "strength").rename(self.meta.name)
+
+
+class TrendPhase(DailyFeature):
+    """趋势相位码：range=0, early=1, mid=2, late=3."""
+
+    def __init__(self):
+        self.meta = FeatureMeta(
+            name="trend_phase",
+            version="1.0",
+            lookback_days=260,
+            available_at="today_close",
+            description="趋势相位码（PHASE_CODE）",
+        )
+
+    def compute(self, ctx: FeatureContext) -> pd.Series:
+        return _trend_panel_field(ctx, "phase_code").rename(self.meta.name)
+
+
+class TrendRisk(DailyFeature):
+    """趋势风险 ∈ [0,1]."""
+
+    def __init__(self):
+        self.meta = FeatureMeta(
+            name="trend_risk",
+            version="1.0",
+            lookback_days=260,
+            available_at="today_close",
+            description="CHoCH/Stage3/贴高滞涨等风险分",
+        )
+
+    def compute(self, ctx: FeatureContext) -> pd.Series:
+        return _trend_panel_field(ctx, "risk").rename(self.meta.name)
+
+
+registry.register(instance=TrendDirection())
+registry.register(instance=TrendStrength())
+registry.register(instance=TrendPhase())
+registry.register(instance=TrendRisk())

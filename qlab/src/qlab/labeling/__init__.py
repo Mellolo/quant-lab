@@ -30,6 +30,7 @@ from qlab.labeling.events import (
 )
 from qlab.labeling.sample_masks import (
     anti_climax_mask,
+    bull_trend_mask,
     combine_masks,
     cross_sectional_rank_mask,
     expand_date_mask,
@@ -45,6 +46,7 @@ from qlab.labeling.sample_masks import (
     smooth_momentum_score,
     stage2_mask,
     tradable_hygiene_mask,
+    trend_phase_mask,
     volume_confirm_mask,
 )
 from qlab.labeling.exit import (
@@ -78,6 +80,7 @@ __all__ = [
     "SampleSpec",
     "VolumeCUSUMFilter",
     "anti_climax_mask",
+    "bull_trend_mask",
     "build_labeled_samples",
     "combine_masks",
     "confirmation_to_entry",
@@ -99,6 +102,7 @@ __all__ = [
     "stage2_mask",
     "to_event_dataframe",
     "tradable_hygiene_mask",
+    "trend_phase_mask",
     "volume_confirm_mask",
     "wide_ohlc_to_long",
     "daily_ewm_vol",

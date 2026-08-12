@@ -355,13 +355,12 @@ class DataCache:
 
         新取数据里含当月等不落盘部分, 必须从内存带出来.
         """
-        if not fresh:
-            return cached
-        frames = [f for f in ([cached] + fresh) if len(f) > 0]
+        frames = [f for f in ([cached] + fresh) if isinstance(f, pd.DataFrame) and len(f) > 0]
         if not frames:
-            return cached
+            return cached if isinstance(cached, pd.DataFrame) else pd.DataFrame()
         merged = pd.concat(frames).sort_index()
         merged = merged[~merged.index.duplicated(keep="last")]
+        # 排序后再按区间切片(非单调时 pandas 不允许端点不存在的 label slice)
         return merged.loc[start:end]
 
     # ==================================================================

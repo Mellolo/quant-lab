@@ -42,6 +42,9 @@ htmlcov/
 *.hdf5
 *.db
 
+# Local artifacts / research outputs (each product under its own subdir)
+output/
+
 # Claude Code
 .claude/
 
