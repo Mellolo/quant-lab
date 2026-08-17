@@ -69,7 +69,7 @@ layers = [
     "qlab.models",
     "qlab.weights",
     "qlab.labeling",
-    "qlab.features",
+    "qlab.features | qlab.review",
     "qlab.data",
     "qlab.core",
 ]

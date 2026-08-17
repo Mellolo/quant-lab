@@ -470,6 +470,118 @@ SCHEMA_FACTOR_EXPOSURE = Schema(
 
 
 # ============================================================================
+# ReviewMarket / ReviewStyle — 日频复盘 ①市场 + ②风格
+# ============================================================================
+
+VOLUME_BINS = ("地量", "正常", "放量", "天量", "天量后缩")
+EMOTION_BINS = ("冰点/恐慌", "修复", "认知", "乐观", "狂热", "分配", "中性/撕裂")
+CLOCK_BINS = ("短博弈", "中线", "混合")
+HABITAT_BINS = ("权重", "弹性", "混合")
+CROWDING_BINS = ("分散", "正常", "聚集", "拥挤待切")
+GROWTH_SOURCES = ("pe", "industry", "")
+STYLE_SCORES = frozenset({-2, -1, 0, 1, 2})
+
+SCHEMA_REVIEW_MARKET = Schema(
+    name="ReviewMarket",
+    index_names=["date"],
+    columns=[
+        ColumnSpec("amount", "float64", nullable=False, description="活跃子集成交额合计（元）"),
+        ColumnSpec("amount_ma20", "float64", description="前 20 日成交额均值（不含 T）"),
+        ColumnSpec("amount_ratio", "float64", description="amount / amount_ma20"),
+        ColumnSpec("volume_bin", "str", nullable=False, description="地量/正常/放量/天量/天量后缩"),
+        ColumnSpec("market_ret", "float64", description="T-1 流通市值加权收益"),
+        ColumnSpec("flow", "float64", description="盘面流向 F = amount × sign(R)"),
+        ColumnSpec("flow_weighted", "float64", description="F^w = amount × R"),
+        ColumnSpec("impact", "float64", description="冲击 I = R / amount_ratio"),
+        ColumnSpec("n_up", "int64", nullable=False, description="上涨家数"),
+        ColumnSpec("n_down", "int64", nullable=False, description="下跌家数"),
+        ColumnSpec("n_tradable", "int64", nullable=False, description="可交易家数（未停牌非 ST、有收盘）"),
+        ColumnSpec("advance_ratio", "float64", description="上涨家数 / 可交易家数"),
+        ColumnSpec("n_limit_up", "int64", nullable=False, description="收盘涨停家数"),
+        ColumnSpec("n_limit_down", "int64", nullable=False, description="收盘跌停家数"),
+        ColumnSpec("n_active", "int64", nullable=False, description="活筹比例过半的家数"),
+        ColumnSpec("live_ret", "float64", description="活跃市值涨跌：0AMV_t / 0AMV_{t-1} − 1"),
+        ColumnSpec("live_gap", "float64", description="活跃市值涨跌 − 流通总市值涨跌（0AMV 相对 0号）"),
+        ColumnSpec("attack_defense", "float64", description="高波组 − 低波组当日收益"),
+        ColumnSpec("emotion_bin", "str", nullable=False, description="情绪六档或中性/撕裂"),
+        ColumnSpec("turnover", "float64", description="成交额 / 可交易流通市值"),
+        ColumnSpec("turnover_ratio", "float64", description="换手 / 前 20 日换手均"),
+        ColumnSpec("active_mcap", "float64", description="活筹市值 Σ 流通市值×(1−e^{−换手/τ})，0AMV 代理"),
+        ColumnSpec("listed_mcap", "float64", description="流通总市值（0号代理）"),
+        ColumnSpec("active_share", "float64", description="活筹 / 流通总市值（0AMV / 0号）"),
+        ColumnSpec("median_ret", "float64", description="活跃子集收益中位数"),
+        ColumnSpec("breadth_gap", "float64", description="市值加权收益 − 中位数（虚涨）"),
+        ColumnSpec("ret_dispersion", "float64", description="个股收益截面标准差"),
+        ColumnSpec("crowding_top1", "float64", description="成交额 Top1% / 全市场"),
+        ColumnSpec("crowding_top10", "float64", description="成交额 Top10% / 全市场"),
+        ColumnSpec("crowding_top10_ma20", "float64", description="Top10 集中度前 20 日均（不含 T）"),
+        ColumnSpec("crowding_delta", "float64", description="Top10 − 自身 20 日均"),
+        ColumnSpec("crowding_bin", "str", nullable=False, description="分散/正常/聚集/拥挤待切"),
+        ColumnSpec("fin_balance", "float64", description="已发布融资余额合计（元，PIT）"),
+        ColumnSpec("fin_delta", "float64", description="融资余额较上一日变化"),
+        ColumnSpec("fin_amount_share", "float64", description="融资买入额 / 市场成交额"),
+    ],
+    invariants=[
+        "volume_bin ∈ {地量, 正常, 放量, 天量, 天量后缩}",
+        "emotion_bin ∈ {冰点/恐慌, 修复, 认知, 乐观, 狂热, 分配, 中性/撕裂}",
+        "crowding_bin ∈ {分散, 正常, 聚集, 拥挤待切}",
+        "n_* ≥ 0；同一 date 唯一",
+    ],
+)
+
+SCHEMA_REVIEW_STYLE = Schema(
+    name="ReviewStyle",
+    index_names=["date"],
+    columns=[
+        ColumnSpec("size_s", "float64", description="小盘 − 大盘"),
+        ColumnSpec("size_m5", "float64", description="规模轴近 5 日滚动强度"),
+        ColumnSpec("size_score", "int64", nullable=False, description="−2～+2，正=要小盘"),
+        ColumnSpec("risk_s", "float64", description="高β − 低β"),
+        ColumnSpec("risk_m5", "float64", description="风险轴近 5 日滚动强度"),
+        ColumnSpec("risk_score", "int64", nullable=False, description="−2～+2，正=要弹性"),
+        ColumnSpec("growth_s", "float64", description="高 PE/成长行业 − 低 PE/价值行业"),
+        ColumnSpec("growth_m5", "float64", description="成长轴近 5 日滚动强度"),
+        ColumnSpec("growth_score", "int64", nullable=False, description="−2～+2，正=要贵的成长"),
+        ColumnSpec("growth_source", "str", nullable=False, description="pe / industry / 空"),
+        ColumnSpec("trend_s", "float64", description="昨强组 − 昨弱组的今日收益"),
+        ColumnSpec("trend_m5", "float64", description="趋势轴近 5 日滚动强度"),
+        ColumnSpec("trend_score", "int64", nullable=False, description="−2～+2，正=强者续强"),
+        ColumnSpec("clock_bin", "str", nullable=False, description="短博弈/中线/混合"),
+        ColumnSpec("habitat", "str", nullable=False, description="权重/弹性/混合（看五日，不是单日）"),
+        ColumnSpec("liq_s", "float64", description="低换手组 − 高换手组"),
+        ColumnSpec("liq_m5", "float64", description="流动性轴近 5 日滚动强度"),
+        ColumnSpec("liq_score", "int64", nullable=False, description="−2～+2，正=要低换手/配置"),
+        ColumnSpec("crowding", "float64", description="成交额 Top10% / 全市场"),
+        ColumnSpec("crowding_delta", "float64", description="Top10 − 自身 20 日均"),
+        ColumnSpec("crowding_bin", "str", nullable=False, description="分散/正常/聚集/拥挤待切"),
+        ColumnSpec("lu_yest_ret", "float64", description="昨涨停今日等权收益"),
+        ColumnSpec("lu_yest_s", "float64", description="昨涨停今日 − 等权市场"),
+        ColumnSpec("lu_yest_m5", "float64", description="昨涨停相对等权近 5 日强度"),
+        ColumnSpec("lu_yest_score", "int64", nullable=False, description="−2～+2，正=昨涨停相对市场在赚"),
+        ColumnSpec("n_lu_yest", "int64", nullable=False, description="昨日涨停家数"),
+        ColumnSpec("lu_promote", "float64", description="昨涨停今日继续涨停的比例"),
+        ColumnSpec("lu_promote_excess", "float64", description="晋级率 − 当日涨停率"),
+        ColumnSpec("lu_promote_z", "float64", description="晋级超额相对自身近窗的 z"),
+        ColumnSpec("lu_promote_score", "int64", nullable=False, description="−2～+2，晋级相对自身近窗"),
+        ColumnSpec("n_board2", "int64", nullable=False, description="连板达到 board_min 的家数"),
+        ColumnSpec("board2_share", "float64", description="二板家数 / 今日涨停"),
+        ColumnSpec("board2_z", "float64", description="二板占比相对自身近窗的 z"),
+        ColumnSpec("board2_score", "int64", nullable=False, description="−2～+2，二板占比相对自身近窗"),
+        ColumnSpec("max_board", "int64", nullable=False, description="今日最高连板（旁注，不打分）"),
+        ColumnSpec("narrative", "str", nullable=False, description="主洋流一句话"),
+    ],
+    invariants=[
+        "*_score ∈ {-2,-1,0,1,2}",
+        "clock_bin ∈ {短博弈, 中线, 混合}",
+        "habitat ∈ {权重, 弹性, 混合}",
+        "crowding_bin ∈ {分散, 正常, 聚集, 拥挤待切}",
+        "growth_source ∈ {pe, industry, ''}",
+        "同一 date 唯一",
+    ],
+)
+
+
+# ============================================================================
 # 校验工具
 # ============================================================================
 
@@ -574,6 +686,10 @@ def _check_invariants(df: pd.DataFrame, schema: Schema) -> None:
         _check_billboard_invariants(df)
     elif schema.name == "FactorExposure":
         _check_factor_exposure_invariants(df)
+    elif schema.name == "ReviewMarket":
+        _check_review_market_invariants(df)
+    elif schema.name == "ReviewStyle":
+        _check_review_style_invariants(df)
 
 
 def _check_daily_bar_invariants(df: pd.DataFrame) -> None:
@@ -1032,6 +1148,75 @@ def _check_billboard_invariants(df: pd.DataFrame) -> None:
     if errs:
         raise SchemaViolationError(
             "[Billboard] 不变量违反:\n" + "\n".join(f"  - {e}" for e in errs),
+            invariant="; ".join(errs),
+        )
+
+
+def _check_review_market_invariants(df: pd.DataFrame) -> None:
+    errs: list[str] = []
+    if df.index.has_duplicates:
+        errs.append(f"date 重复: {int(df.index.duplicated().sum())} 行")
+    if "volume_bin" in df.columns:
+        bad = ~df["volume_bin"].isin(VOLUME_BINS)
+        if bad.any():
+            uniq = sorted(set(df.loc[bad, "volume_bin"].dropna().astype(str)))
+            errs.append(f"非法 volume_bin: {uniq[:5]}")
+    if "emotion_bin" in df.columns:
+        bad = ~df["emotion_bin"].isin(EMOTION_BINS)
+        if bad.any():
+            uniq = sorted(set(df.loc[bad, "emotion_bin"].dropna().astype(str)))
+            errs.append(f"非法 emotion_bin: {uniq[:5]}")
+    if "crowding_bin" in df.columns:
+        bad = ~df["crowding_bin"].isin(CROWDING_BINS)
+        if bad.any():
+            uniq = sorted(set(df.loc[bad, "crowding_bin"].dropna().astype(str)))
+            errs.append(f"非法 crowding_bin: {uniq[:5]}")
+    for col in ("n_up", "n_down", "n_tradable", "n_limit_up", "n_limit_down", "n_active"):
+        if col in df.columns and (df[col] < 0).any():
+            errs.append(f"{col} 含负数")
+    if errs:
+        raise SchemaViolationError(
+            "[ReviewMarket] 不变量违反:\n" + "\n".join(f"  - {e}" for e in errs),
+            invariant="; ".join(errs),
+        )
+
+
+def _check_review_style_invariants(df: pd.DataFrame) -> None:
+    errs: list[str] = []
+    if df.index.has_duplicates:
+        errs.append(f"date 重复: {int(df.index.duplicated().sum())} 行")
+    for col in (
+        "size_score", "risk_score", "growth_score", "trend_score", "liq_score",
+        "lu_yest_score", "lu_promote_score", "board2_score",
+    ):
+        if col not in df.columns:
+            continue
+        bad = ~df[col].isin(STYLE_SCORES)
+        if bad.any():
+            errs.append(f"{col} 超出 −2～+2")
+    if "clock_bin" in df.columns:
+        bad = ~df["clock_bin"].isin(CLOCK_BINS)
+        if bad.any():
+            uniq = sorted(set(df.loc[bad, "clock_bin"].dropna().astype(str)))
+            errs.append(f"非法 clock_bin: {uniq[:5]}")
+    if "habitat" in df.columns:
+        bad = ~df["habitat"].isin(HABITAT_BINS)
+        if bad.any():
+            uniq = sorted(set(df.loc[bad, "habitat"].dropna().astype(str)))
+            errs.append(f"非法 habitat: {uniq[:5]}")
+    if "crowding_bin" in df.columns:
+        bad = ~df["crowding_bin"].isin(CROWDING_BINS)
+        if bad.any():
+            uniq = sorted(set(df.loc[bad, "crowding_bin"].dropna().astype(str)))
+            errs.append(f"非法 crowding_bin: {uniq[:5]}")
+    if "growth_source" in df.columns:
+        bad = ~df["growth_source"].isin(GROWTH_SOURCES)
+        if bad.any():
+            uniq = sorted(set(df.loc[bad, "growth_source"].dropna().astype(str)))
+            errs.append(f"非法 growth_source: {uniq[:5]}")
+    if errs:
+        raise SchemaViolationError(
+            "[ReviewStyle] 不变量违反:\n" + "\n".join(f"  - {e}" for e in errs),
             invariant="; ".join(errs),
         )
 

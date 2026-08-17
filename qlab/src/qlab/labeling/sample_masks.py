@@ -39,7 +39,7 @@ from qlab.core.price_panels import (
     is_stage2_panel,
     smooth_momentum_panel,
 )
-from qlab.diagnostics.trend import PHASE_CODE, trend_panels
+from qlab.diagnostics.trend import trend_panels
 
 
 def _stack_bool(mask: pd.DataFrame, name: str) -> pd.Series:
@@ -683,51 +683,16 @@ def market_breadth_mask(
     return expand_date_mask(day_ok, syms, name="market_breadth")
 
 
-def trend_phase_mask(
-    close: pd.DataFrame,
-    high: pd.DataFrame | None = None,
-    low: pd.DataFrame | None = None,
-    volume: pd.DataFrame | None = None,
-    *,
-    phases: set[str] | frozenset[str] | list[str] = ("early", "mid"),
-    min_strength: float | None = None,
-    max_risk: float | None = None,
-) -> pd.Series:
-    """趋势相位门 — 基于 :func:`~qlab.diagnostics.trend.trend_panels`.
-
-    默认保留 ``early``/``mid``（适合做多趋势跟随采样）。
-    """
-    want = {PHASE_CODE[p] for p in phases}
-    panels = trend_panels(
-        close, high=high, low=low, volume=volume, include_xs_rank=False
-    )
-    keep = panels["phase_code"].isin(want)
-    if min_strength is not None:
-        keep = keep & (panels["strength"] >= float(min_strength))
-    if max_risk is not None:
-        keep = keep & (panels["risk"] <= float(max_risk))
-    return _stack_bool(keep, "trend_phase")
-
-
 def bull_trend_mask(
     close: pd.DataFrame,
     high: pd.DataFrame | None = None,
     low: pd.DataFrame | None = None,
-    volume: pd.DataFrame | None = None,
     *,
-    phases: set[str] | frozenset[str] | list[str] = ("early", "mid"),
-    min_strength: float = 0.5,
-    max_risk: float = 0.7,
+    min_efficiency: float | None = None,
 ) -> pd.Series:
-    """多头趋势门：``direction=+1`` 且相位/强度/风险过滤."""
-    panels = trend_panels(
-        close, high=high, low=low, volume=volume, include_xs_rank=False
-    )
-    want = {PHASE_CODE[p] for p in phases}
-    keep = (
-        (panels["direction"] > 0)
-        & panels["phase_code"].isin(want)
-        & (panels["strength"] >= float(min_strength))
-        & (panels["risk"] <= float(max_risk))
-    )
+    """多头趋势门：``direction=+1``，可选效率下限。仓位门请叠加 ``flow_panels``."""
+    panels = trend_panels(close, high=high, low=low, include_xs_rank=False)
+    keep = panels["direction"] > 0
+    if min_efficiency is not None:
+        keep = keep & (panels["efficiency"] >= float(min_efficiency))
     return _stack_bool(keep, "bull_trend")

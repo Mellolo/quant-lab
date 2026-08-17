@@ -1,11 +1,11 @@
-"""趋势阶段 / 结构类特征 — Weinstein Stage、Trend Template、诊断五轴."""
+"""趋势 / 结构类特征 — Weinstein Stage、方向 / 效率."""
 
 from __future__ import annotations
 
 import pandas as pd
 
 from qlab.core.price_panels import dist_to_high_panel, stage_panel
-from qlab.diagnostics.trend import trend_panels
+from qlab.diagnostics.trend import direction_panels, trend_panels
 from qlab.features.base import DailyFeature, FeatureMeta
 from qlab.features.context import FeatureContext
 from qlab.features.registry import registry
@@ -91,13 +91,15 @@ registry.register(instance=DistToHigh(60))
 def _trend_panel_field(
     ctx: FeatureContext, field: str, *, lookback_days: int = 260
 ) -> pd.Series:
-    """从日线宽表算 trend_panels 并取单字段 Series."""
-    df = ctx.daily(["close", "high", "low"], lookback_days=lookback_days)
+    df = ctx.daily(["close", "high", "low", "open"], lookback_days=lookback_days)
     close = df["close"].unstack("symbol")
     high = df["high"].unstack("symbol")
     low = df["low"].unstack("symbol")
-    panels = trend_panels(
-        close, high=high, low=low, volume=None, include_xs_rank=False
+    open_ = df["open"].unstack("symbol")
+    panels = (
+        direction_panels(close, high=high, low=low, open_=open_)
+        if field == "direction"
+        else trend_panels(close, high=high, low=low, open_=open_, include_xs_rank=False)
     )
     return panels[field].stack(future_stack=True)
 
@@ -111,62 +113,62 @@ class TrendDirection(DailyFeature):
             version="1.0",
             lookback_days=260,
             available_at="today_close",
-            description="市场结构+Stage 汇总方向（diagnostics.trend）",
+            description="SuperTrend 生方向，这条路径留存过低则为 0",
         )
 
     def compute(self, ctx: FeatureContext) -> pd.Series:
         return _trend_panel_field(ctx, "direction").rename(self.meta.name)
 
 
-class TrendStrength(DailyFeature):
-    """趋势强度 ∈ [0,1]（滚动分位合成）."""
+class TrendEfficiency(DailyFeature):
+    """效率 ∈ [0,1]：这段趋势近权净位移 / 路程。"""
 
     def __init__(self):
         self.meta = FeatureMeta(
-            name="trend_strength",
+            name="trend_efficiency",
             version="1.0",
             lookback_days=260,
             available_at="today_close",
-            description="smooth mom + 结构扩展比的滚动分位强度",
+            description="趋势效率（收盘近权净位移 / 路程，对着干为 0）",
         )
 
     def compute(self, ctx: FeatureContext) -> pd.Series:
-        return _trend_panel_field(ctx, "strength").rename(self.meta.name)
+        return _trend_panel_field(ctx, "efficiency").rename(self.meta.name)
 
 
-class TrendPhase(DailyFeature):
-    """趋势相位码：range=0, early=1, mid=2, late=3."""
+class TrendOvernightEfficiency(DailyFeature):
+    """隔夜效率 ∈ [-1,1]：这段跳空跟方向是同向还是对着干。"""
 
     def __init__(self):
         self.meta = FeatureMeta(
-            name="trend_phase",
+            name="trend_overnight_efficiency",
             version="1.0",
             lookback_days=260,
             available_at="today_close",
-            description="趋势相位码（PHASE_CODE）",
+            description="隔夜效率（跳空近权净位移 / 路程，对着干为负）",
         )
 
     def compute(self, ctx: FeatureContext) -> pd.Series:
-        return _trend_panel_field(ctx, "phase_code").rename(self.meta.name)
+        return _trend_panel_field(ctx, "overnight_efficiency").rename(self.meta.name)
 
 
-class TrendRisk(DailyFeature):
-    """趋势风险 ∈ [0,1]."""
+class TrendSessionEfficiency(DailyFeature):
+    """盘中效率 ∈ [-1,1]：这段开盘到收盘跟方向是同向还是对着干。"""
 
     def __init__(self):
         self.meta = FeatureMeta(
-            name="trend_risk",
+            name="trend_session_efficiency",
             version="1.0",
             lookback_days=260,
             available_at="today_close",
-            description="CHoCH/Stage3/贴高滞涨等风险分",
+            description="盘中效率（开盘到收盘近权净位移 / 路程，对着干为负）",
         )
 
     def compute(self, ctx: FeatureContext) -> pd.Series:
-        return _trend_panel_field(ctx, "risk").rename(self.meta.name)
+        return _trend_panel_field(ctx, "session_efficiency").rename(self.meta.name)
 
 
 registry.register(instance=TrendDirection())
-registry.register(instance=TrendStrength())
-registry.register(instance=TrendPhase())
-registry.register(instance=TrendRisk())
+registry.register(instance=TrendEfficiency())
+registry.register(instance=TrendOvernightEfficiency())
+registry.register(instance=TrendSessionEfficiency())

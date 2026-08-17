@@ -1,86 +1,34 @@
-# 趋势诊断（Trend Diagnostics）
+# 趋势诊断
 
-独立于采样门与因子库的日线趋势评价工具：回答「这段 K 线现在怎么走」。
+任意一天：方向、起点、效率（收盘 / 隔夜 / 盘中）。方向为 0 时三个效率都空着，改评震荡箱子。  
+仓位见 [flow-diagnostics.md](./flow-diagnostics.md)。
 
-## 定位
+## 方向
 
-| 层 | 模块 | 职责 |
-|----|------|------|
-| 算法 | `qlab.core.price_panels` | 枢轴 / 结构状态 / Stage / smooth mom |
-| 门面 | `qlab.diagnostics.trend` | `TrendReport` / `diagnose_trend` / `trend_panels` |
-| 适配 | features / sample_masks | 可选：把诊断结果挂到因子或采样门 |
+双 SuperTrend 先给出生方向：慢轨 ATR(10)×3，快轨 ATR(10)×2，同向才认 ±1，切换确认 2 根。
+
+闸看这条路径自己的留存，不用全世界共用的效率及格线。起点龄 ≥ 5 且
 
 ```text
-OHLCV → price_panels → trend_panels / diagnose_trend → (feature | mask | notebook)
+留存 = 今天还在的顺势推进 / 这段最远的顺势推进
 ```
 
-## 五轴
+低于 0.50（这段自己的路吐回一半以上）时，对外方向置 0。效率仍是近权净位移 / 路程，只说明走得黏不黏，不再拿来卡方向。
 
-对每个确认日（收盘后）：
+## 起点
 
-| 轴 | 取值 | 含义 |
-|----|------|------|
-| `direction` | -1 / 0 / +1 | 空 / 震荡 / 多（主：slow；冲突不强制清零；弱市磨底→0；切换需确认） |
-| `strength` | [0,1] | 滚动分位 + 绝对动量（smooth mom + slow 扩展比） |
-| `phase` | early / mid / late / range | 初 / 中 / 末 / 区间 |
-| `quality` | [0,1] | R² + Kaufman 效率比 + 回调健康（+ 轻量能量） |
-| `risk` | [0,1] | slow CHoCH 粘滞 / Stage3 / 贴高点滞涨 / 冲突 |
+折线用 TradingView `pivothigh/pivotlow(src, 2, 2)`。同向点留更极端的；反向腿要满约 5 根或走出约 2×ATR。
 
-另有 `regime` 字符串便于人读；研究与门控优先用分轴。
+多头沿更高低点回到这段谷；空头沿更低高点回到这段峰。折线只用来找起点。起点按 SuperTrend 生方向的战役算，不因留存闸切开。
 
-## 市场结构（孤立高低点）
+## 效率
 
-- 枢轴：左右各 `L` 根（fast=`3`，slow=`5`）
-- **确认日 = 枢轴右端收盘日**（PIT：此前不可用）
-- 破位：收盘越过最近 swing high/low（不用影线）
-- BOS：趋势方向上的收盘突破（同水平只计一次）
-- CHoCH：反向收盘跌破保护摆动 → `phase=late`，方向清零
+整段 `[起点 → 今天]`，同一套近权 `2^(-龄 / 16)`，打三个分。收盘到收盘拆成隔夜跳空（今开 − 昨收）和盘中（今收 − 今开）。
 
-## 相位规则（默认）
-
-- `range`：输出 `direction=0`（含 Stage1/4 弱市磨底抑制）
-- `mid`：有方向，且（slow `bos≥2` 且 strength 够，**或** strength+效率比显示主升/主跌）
-- `early`：有方向但尚未进入 mid
-- `late`：slow CHoCH 短粘滞（动量走强则清除），或 Stage 2→3，或贴高滞涨
-- fast/slow 冲突与 Stage 冲突只抬 `conflict`/`risk`，不再直接打成 range
-
-## API
-
-### 单标的
-
-```python
-from qlab.diagnostics import diagnose_trend
-
-report = diagnose_trend(ohlcv_df)  # columns: close[, high, low, volume]
-print(report.summary)
-print(report.direction, report.phase, report.strength)
+```text
+效率     = clip( 方向 × Σ wΔ收盘 / Σ w|Δ收盘| , 0, 1)
+隔夜效率 = clip( 方向 × Σ w·跳空 / Σ w|跳空| , -1, 1)
+盘中效率 = clip( 方向 × Σ w·盘中 / Σ w|盘中| , -1, 1)
 ```
 
-### 全市场宽表
-
-```python
-from qlab.diagnostics import trend_panels
-
-panels = trend_panels(close, high=high, low=low, volume=volume)
-# panels["direction"], ["strength"], ["phase_code"], ...
-```
-
-`phase_code`：`range=0, early=1, mid=2, late=3`（见 `PHASE_CODE`）。
-
-## 默认参数
-
-- Stage：`ma=200`, `slope_lookback=20`
-- smooth mom：`window=60`；滚动分位窗 `252`
-- dist_high：`60` / `120`
-- 无 volume 时跳过量能项
-
-## 与采样 / 因子
-
-- 采样门：`trend_phase_mask` / `bull_trend_mask`（`sample_masks`）
-- 因子：`TrendDirection` / `TrendStrength` / `TrendPhase`（`features.library.trend`）
-
-诊断本体不依赖 labeling；适配器可按需启用。
-
-## 本地产物
-
-案例报告、图表等运行产物放在 gitignore 的 `output/<产物名>/`（例如 `output/trend-diag-600390/`），不进仓库。
+效率只看收盘整段顺不顺，对着干记 0。隔夜 / 盘中跟方向对着干就是负数。对外方向为 0 时三个都不公布。

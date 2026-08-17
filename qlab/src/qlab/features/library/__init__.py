@@ -12,6 +12,7 @@
 # 触发各模块的注册副作用
 from qlab.features.library import (  # noqa: F401
     auction,
+    flow,
     fundamental,
     intraday,
     momentum,
@@ -25,14 +26,15 @@ from qlab.features.library.fundamental import PB, PE_TTM
 from qlab.features.library.intraday import IntradayVolSlope, MorningReturn
 from qlab.features.library.momentum import Momentum, MomentumResidual, SmoothMomentum
 from qlab.features.library.price import FractionalDiff, LogPrice, PriceMA
+from qlab.features.library.flow import FlowHold
 from qlab.features.library.trend import (
     DistToHigh,
     IsStage2,
     StageLabel,
     TrendDirection,
-    TrendPhase,
-    TrendRisk,
-    TrendStrength,
+    TrendEfficiency,
+    TrendOvernightEfficiency,
+    TrendSessionEfficiency,
 )
 from qlab.features.library.volatility import EwmVol, RealizedVol
 from qlab.features.library.volume import TurnoverRatio, VolumeRatio
@@ -50,7 +52,9 @@ __all__ = [
     "PE_TTM", "PB",
     # trend / stage
     "StageLabel", "IsStage2", "DistToHigh",
-    "TrendDirection", "TrendStrength", "TrendPhase", "TrendRisk",
+    "TrendDirection", "TrendEfficiency",
+    "TrendOvernightEfficiency", "TrendSessionEfficiency",
+    "FlowHold",
     # intraday
     "IntradayVolSlope", "MorningReturn",
     # auction (today_open)

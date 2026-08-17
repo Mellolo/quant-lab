@@ -46,7 +46,6 @@ from qlab.labeling.sample_masks import (
     smooth_momentum_score,
     stage2_mask,
     tradable_hygiene_mask,
-    trend_phase_mask,
     volume_confirm_mask,
 )
 from qlab.labeling.exit import (
@@ -102,7 +101,6 @@ __all__ = [
     "stage2_mask",
     "to_event_dataframe",
     "tradable_hygiene_mask",
-    "trend_phase_mask",
     "volume_confirm_mask",
     "wide_ohlc_to_long",
     "daily_ewm_vol",
