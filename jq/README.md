@@ -139,8 +139,8 @@ dc.get_all_securities()          # ✗ TypeError
 | 空结果 | 写空月标记(不再重查) | 不缓存 |
 | 当天/未来 | 当月不落盘 | 不落盘 |
 
-**时序类** (7 个): `get_price` / `get_price_batch` / `get_money_flow` /
-`get_valuation` / `get_mtss` / `get_extras` / `get_call_auction`
+**时序类** (8 个): `get_price` / `get_price_batch` / `get_money_flow` /
+`get_valuation` / `get_index_valuation` / `get_mtss` / `get_extras` / `get_call_auction`
 
 **快照类** (14 个): `get_all_securities` / `get_security_info` /
 `get_all_trade_days` / `get_trade_days` / `get_industries` / `get_industry_stocks` /
@@ -167,6 +167,9 @@ df = dc.get_price('600519.XSHG', '2024-01-01', '2024-06-30')  # ← 直接命中
 
 df = dc.get_valuation('600519.XSHG', '2024-01-01', '2024-06-30',
                       fields=['pe_ratio', 'pb_ratio'])
+df = dc.get_index_valuation('000001.XSHG', '2024-01-01', '2024-06-30',
+                            fields=['turnover_ratio', 'circulating_market_cap'])
+# 中证全指用 000985.CSI, 不要用 000985.XSHG(空表)
 
 # 快照类 —— 时点必填(见上文"必须显式绑定时点")
 stocks = dc.get_index_stocks('000300.XSHG', '2024-06-03')
@@ -210,6 +213,8 @@ jqdata cache prune                  # 删当月/未来月分片
   需 `from jqdata.apis import *` (非 `from jqdata import *`)
 - `get_valuation` 不传 fields 时聚宽会尝试查不存在的 `pcf_ratio2` 字段, cache 层
   显式传安全字段列表规避
+- `get_index_valuation` 只接单只代码(传 list 聚宽只回第一只且不报错);
+  中证全指用 `000985.CSI`, 深证综指/国证A指/`000985.XSHG` 实测空表
 - `fields` 里出现不存在的字段会**直接报错**(而非静默丢列)
 - `end_date` / `date` / `today_key` 一律必填, 不接受“取到最新”(见上文)
 - `count` 与 `start_date` 二选一, 但两者都需配 `end_date`

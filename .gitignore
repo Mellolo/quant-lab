@@ -42,6 +42,9 @@ htmlcov/
 *.hdf5
 *.db
 
+# Secrets
+.env
+
 # Local artifacts / research outputs (each product under its own subdir)
 output/
 

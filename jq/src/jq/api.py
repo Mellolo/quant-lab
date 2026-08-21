@@ -50,6 +50,7 @@ __all__ = [
     "get_fundamentals",
     "get_history_fundamentals",
     "get_valuation",
+    "get_index_valuation",
     "run_query",
     "get_billboard_list",
     "get_money_flow",
@@ -389,6 +390,56 @@ def get_valuation(  # noqa: D401
 
     Returns:
         DataFrame, columns 包含 code/day + 指定 fields.
+    """
+
+
+def get_index_valuation(  # noqa: D401
+    security: str,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    fields: list[str] | None = None,
+    count: int | None = None,
+) -> pd.DataFrame:
+    """获取指数 / 申万·聚宽一级行业的市值表(估值指标).
+
+    与 ``get_valuation`` 字段同构, 但对象是指数或行业指数, 不是个股.
+    本地取数请用 ``DataCache.get_index_valuation`` —— 本函数是参考存根.
+
+    Args:
+        security: **单只**指数或行业代码. 聚宽签名虽叫 ``security_list``,
+            传 list **只返回第一只且不报错**(与 ``get_valuation`` 同坑).
+        start_date: 开始日期, 不能与 count 共用.
+        end_date: 结束日期.
+        count: 往前查询 N 个交易日的数据.
+        fields: 市值表字段, 返回结果总会包含 ``code`` / ``day``. 可用字段::
+
+            code                  指数/行业代码(指数需 .XSHE/.XSHG/.CSI)
+            day                   日期
+            capitalization        总股本(万股)
+            circulating_cap       流通股本(万股)
+            market_cap            总市值(亿元)
+            circulating_market_cap 流通市值(亿元)
+            turnover_ratio        换手率(%)
+            pe_ratio              市盈率(PE, TTM)
+            pe_ratio_lyr          市盈率(PE)
+            pb_ratio              市净率(PB)
+            ps_ratio              市销率(PS, TTM)
+            pcf_ratio             市现率(PCF, 现金净流量TTM)
+            dividend_ratio        股息率
+            free_cap              自由流通股本(万股)
+            free_market_cap       自由流通市值(亿元)
+            a_cap                 A 股总股本(万股)
+            a_market_cap          A 股总市值(亿元)
+
+    Returns:
+        DataFrame, columns 包含 code/day + 指定 fields. 无覆盖的指数返回空表.
+
+    Note:
+        **覆盖不是全指数**. 实测 2026-07: 上证/深成/沪深300/中证500/中证1000/
+        上证50/创业板/``000985.CSI``(中证全指) 有数;
+        ``399106.XSHE``(深证综指)、``399317.XSHE``(国证A指)、
+        ``000985.XSHG``(中证全指上交所代码) 返回空表.
+        全市场换手用 ``000985.CSI``, 不要用 ``000985.XSHG``.
     """
 
 

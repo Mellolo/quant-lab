@@ -598,6 +598,30 @@ class FakeDataSource:
             hours=9, minutes=30
         )
 
+    def fetch_index_valuation(
+        self, symbol: str, start: pd.Timestamp, end: pd.Timestamp
+    ) -> pd.DataFrame:
+        """合成指数市值表. 返回 IndexValuation schema."""
+        days = self._biz_days(start, end)
+        if len(days) == 0:
+            empty = pd.DataFrame(
+                columns=["symbol", "turnover", "circulating_mcap", "amount", "market_cap"]
+            )
+            empty.index.name = "date"
+            return empty
+        to = 0.01 + 0.001 * np.sin(np.arange(len(days), dtype=float) / 8.0)
+        mcap = 8.0e13
+        return pd.DataFrame(
+            {
+                "symbol": str(symbol),
+                "turnover": to,
+                "circulating_mcap": mcap,
+                "amount": to * mcap,
+                "market_cap": mcap * 1.15,
+            },
+            index=pd.DatetimeIndex(days, name="date"),
+        )
+
     def fetch_margin_trading(self, symbols: list[str],
                              start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
         """合成两融数据. 返回 MarginTrading schema."""

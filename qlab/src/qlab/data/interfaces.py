@@ -167,6 +167,18 @@ class DataSource(Protocol):
         """拉取因子暴露. 返回 FactorExposure schema(列名 = 因子名)."""
         ...
 
+    def fetch_index_valuation(
+        self,
+        symbol: str,
+        start: pd.Timestamp,
+        end: pd.Timestamp,
+    ) -> pd.DataFrame:
+        """拉取单只指数/行业市值表. 返回 IndexValuation schema.
+
+        全市场成交额与换手走这张表，不把个股加总。
+        """
+        ...
+
 
 @runtime_checkable
 class BarStore(Protocol):

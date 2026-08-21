@@ -1,9 +1,10 @@
-# 复盘模块（qlab.review）
+# 复盘公式（①② 语义冻结）
 
 > 日常复盘按手册顺序走：①市场 → ②风格 → ③题材/共识 → ④个股 → ⑤收口。  
 > 语义以 `docs/market-regime/handbook.md` 为准。  
-> 本模块 **v1 只实现 ①②**。③ 先拆清「数据 / 人工」，不写代码。  
-> 依赖：`core ← data ← review`。不依赖 features / models。
+> **代码在 `yzdata`，不在 qlab。** `qlab.review` 已删除。  
+> **2026-08-20**：① 参与度盯**成交额**（过手的钱），不盯换手/库存。换手比可留对照，不定档。  
+> 对照与取数：[`yzdata/docs/review-indicators.md`](../../../yzdata/docs/review-indicators.md)。
 
 ---
 
@@ -25,33 +26,15 @@
 ①② 几乎全是价量 + 财务/行业，可以算完。  
 ③ 里「是不是一簇、赚还是亏、四勾分档」能算；「在炒什么、规则/仓位、收口 if-then」要人 + 自然语言。
 
-定簇冻结算法仍在 [cluster-module.md](cluster-module.md)，那是 ③ 的数据半边，还没实现。
+定簇算法对照 [cluster-module.md](cluster-module.md)，代码在 yzdata `pockets()`。
 
 ---
 
-## 1. 文件
+## 1. 代码在哪
 
-```
-qlab/src/qlab/review/
-  __init__.py
-  spec.py      # ReviewSpec
-  panels.py    # 收益、市值、分组、多空差
-  market.py    # ① 量档、情绪档、盘面 F/I、广度
-  style.py     # ② 四轴 −2～+2，外加时钟/拥挤
-  engine.py    # 取数 + run()
-```
-
-`core/schema.py` 加 `SCHEMA_REVIEW_MARKET`、`SCHEMA_REVIEW_STYLE`。  
-测试：`qlab/tests/test_review.py`（合成盘面锁档位 + FakeDataSource 跑通）。
-
-入口：`from qlab.review import run, ReviewSpec`。
-
-```python
-result = run(data, start, end, universe="hs_a")
-result.market   # 一日一行
-result.style
-result.summary(date)   # 手册前两行
-```
+实现：`yzdata/src/yzdata/market.py`、`style.py`；入口 `ReviewSource.review()`。  
+定簇：`yzdata` 的 `pockets()`，算法仍对照 [cluster-module.md](cluster-module.md)。  
+测试：`yzdata/tests/test_market.py`、`test_style.py`。
 
 ---
 
@@ -78,7 +61,10 @@ result.summary(date)   # 手册前两行
 
 ### 3.1 参与度（量档）
 
-全市场成交额 \(A_t=\sum_{i\in U_t}\mathrm{amount}_{i,t}\)。  
+参与度以**成交额比**定档（过手的钱）。换手比只对照，不定档。
+
+全市场成交额 / 换手来自指数估值（默认中证全指 `000985.CSI` 的 `get_index_valuation`），**不把个股加总**。  
+聚宽换手是百分数、市值是亿元；数据源换成小数与元后，\(A_t=\) 换手 \(\times\) 流通市值。  
 均量用 **不含 T** 的前 20 日：\(\bar A_t=\mathrm{mean}(A_{t-20},\ldots,A_{t-1})\)。  
 \(r_t=A_t/\bar A_t\)。缩量：\(A_t<A_{t-1}\)。
 
@@ -113,7 +99,7 @@ I_t=R^{m}_t/r_t
 - 活跃市值（指南针 0AMV 语义，算法是我们的代理，不是官方公式）：个股活筹比例 \(w=1-e^{-\text{换手}/\tau}\)（默认 \(\tau=2\%\)），\(0\mathrm{AMV}=\sum\) 今日流通市值 \(\times w\)。0号 = 今日流通总市值。`active_share` = 0AMV / 0号。`live_ret` = 0AMV 水平的日涨跌；`live_gap` = 该涨跌 − 0号涨跌（0号涨、0AMV 跌 = 指南针说的牛背离）。不写死 4 亿，也不用换手 1% 一刀切把票踢出 0AMV
 - 活跃家数：活筹比例 \(\ge 0.5\) 的只数（只数用，不定义 0AMV 成员）
 - 截面离散度：个股收益标准差
-- 全市场换手 = 成交额 / 可交易流通市值；换手比对照前 20 日
+- 全市场换手 = 指数估值换手（小数）；换手比对照前 20 日。0 号流通市值仍是宇宙个股合计（活跃市值用）
 - 集中度：成交额 Top1% / Top10%，对照自身 20 日均得 \(\Delta\)。档：分散 / 正常 / 聚集 / 拥挤待切（高且滞涨才待切）
 - 融资余额：只用 `available_at` 已发布数（通常是 T-1），不进量档/情绪档
 

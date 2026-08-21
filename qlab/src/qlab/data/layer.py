@@ -17,6 +17,7 @@ from qlab.core.schema import (
     SCHEMA_FACTOR_EXPOSURE,
     SCHEMA_FUNDAMENTAL,
     SCHEMA_INTRADAY_BAR,
+    SCHEMA_INDEX_VALUATION,
     SCHEMA_MARGIN_TRADING,
     SCHEMA_MONEY_FLOW,
     validate_schema,
@@ -662,4 +663,38 @@ class DataLayer:
             self.store.put(key, df)
         if validate and not df.empty:
             validate_schema(df, SCHEMA_FACTOR_EXPOSURE, strict_index=True)
+        return df
+
+    def index_valuation(
+        self,
+        symbol: str,
+        start: str | pd.Timestamp,
+        end: str | pd.Timestamp,
+        validate: bool = True,
+    ) -> pd.DataFrame:
+        """指数/行业市值表. 返回 IndexValuation schema（date 索引）.
+
+        复盘用它算全市场成交，不把个股加总。
+        """
+        start = pd.Timestamp(start)
+        end = pd.Timestamp(end)
+        fn = getattr(self.source, "fetch_index_valuation", None)
+        if fn is None:
+            raise NotImplementedError(
+                f"{type(self.source).__name__} 没有 fetch_index_valuation"
+            )
+        key = make_cache_key(
+            kind="index_valuation",
+            symbol=symbol,
+            start=str(start.date()),
+            end=str(end.date()),
+            source_version=getattr(self.source, "source_version", "unknown"),
+        )
+        if self.store.has(key):
+            df = self.store.get(key)
+        else:
+            df = fn(symbol, start, end)
+            self.store.put(key, df)
+        if validate and not df.empty:
+            validate_schema(df, SCHEMA_INDEX_VALUATION, strict_index=True)
         return df

@@ -6,7 +6,7 @@
 > PIT：结构用到 T-1，激活用 T 收盘。β 估到 T-1。  
 > 复盘语义：`docs/market-regime/09-cluster-and-consensus.md`。
 
-以后若实现，挂在 `qlab.review` 下，不要再单独做成选股库。下面两轮「检查纪要」里的坑已经收进正文，不要再改回旧路径。
+实现在 `yzdata`（`pockets()`），不要做成选股库，也不要再挂回 qlab。下面两轮「检查纪要」里的坑已经收进正文，不要再改回旧路径。
 
 ---
 
@@ -111,13 +111,11 @@
 ## 1. 模块（v1 只这些文件）
 
 ```
-# 未实现。将来挂在 qlab.review 下，不要再单独做成 qlab.clusters 选股库。
-qlab/src/qlab/review/clusters/   # 规划中
-  spec.py / residual.py / meso.py / assign.py / name.py / play.py
+yzdata/src/yzdata/cluster.py
+yzdata/src/yzdata/cluster_name.py
 ```
 
-`core/schema.py` 加 `SCHEMA_CLUSTER`、`SCHEMA_CLUSTER_MEMBER`。  
-测试：`qlab/tests/test_clusters.py`（FakeDataSource + 可控行业标签）。
+测试：`yzdata/tests/test_cluster_synth.py`。
 
 依赖：已有 numpy / pandas / scipy。不新加包。不写 Ledoit–Wolf（连边已用高阈值 pairwise，不求逆、不用谱）。
 

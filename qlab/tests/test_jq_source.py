@@ -159,6 +159,18 @@ class FakeCache:
         return {c: {"jq_concept": [{"concept_code": "GN001", "concept_name": "白酒"}]}
                 for c in codes}
 
+    def get_index_valuation(self, code, start, end, *, fields=None):
+        self.calls.append("get_index_valuation")
+        return pd.DataFrame(
+            {
+                "code": code,
+                "turnover_ratio": 1.7916,
+                "circulating_market_cap": 944382.3351,
+                "market_cap": 1.1e6,
+            },
+            index=_DATES,
+        )
+
     def get_mtss(self, code, start, end):
         self.calls.append("get_mtss")
         # jq 层会注入 available_at(下一交易日 09:30), 此处模拟
@@ -266,7 +278,8 @@ SYMS = ["600519.SH", "000001.SZ"]
 
 @pytest.mark.parametrize(
     ("qlab", "jq"),
-    [("600519.SH", "600519.XSHG"), ("000001.SZ", "000001.XSHE")],
+    [("600519.SH", "600519.XSHG"), ("000001.SZ", "000001.XSHE"),
+     ("000985.CSI", "000985.CSI"), ("801780.SI", "801780.SI")],
 )
 def test_symbol_roundtrip(qlab: str, jq: str):
     assert to_jq_code(qlab) == jq
@@ -1257,9 +1270,21 @@ from qlab.core.schema import (  # noqa: E402
     SCHEMA_BILLBOARD,
     SCHEMA_CALL_AUCTION,
     SCHEMA_FACTOR_EXPOSURE,
+    SCHEMA_INDEX_VALUATION,
     SCHEMA_MARGIN_TRADING,
     SCHEMA_MONEY_FLOW,
 )
+
+
+def test_fetch_index_valuation_converts_units(src: JQDataSource):
+    """jq 换手是百分数、市值是亿元 → qlab 小数与元。"""
+    df = src.fetch_index_valuation("000985.CSI", _DATES[0], _DATES[-1])
+    validate_schema(df, SCHEMA_INDEX_VALUATION, strict_index=True)
+    assert df["turnover"].iloc[0] == pytest.approx(0.017916)
+    assert df["circulating_mcap"].iloc[0] == pytest.approx(944382.3351 * 1e8)
+    assert df["amount"].iloc[0] == pytest.approx(0.017916 * 944382.3351 * 1e8)
+    assert (df["symbol"] == "000985.CSI").all()
+    assert "get_index_valuation" in src.cache.calls
 
 
 def test_fetch_margin_trading(src: JQDataSource):
@@ -1347,6 +1372,7 @@ def test_fake_source_implements_b_methods():
     validate_schema(f.fetch_call_auction(syms, d0, d1), SCHEMA_CALL_AUCTION, strict_index=True)
     validate_schema(f.fetch_billboard(d1, syms), SCHEMA_BILLBOARD, strict_index=False)
     validate_schema(f.fetch_factor_exposure(syms, ["size"], d0, d1), SCHEMA_FACTOR_EXPOSURE, strict_index=True)
+    validate_schema(f.fetch_index_valuation("000985.CSI", d0, d1), SCHEMA_INDEX_VALUATION, strict_index=True)
 
 
 # ======================================================================

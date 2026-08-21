@@ -65,6 +65,17 @@ class FakeRunner:
             return {"error": None, "stdout": _encode([d.date() for d in days])}
         if self.empty:
             result: object = pd.DataFrame()
+        elif "get_index_valuation" in code:
+            days = pd.bdate_range(start, end)
+            result = pd.DataFrame({
+                "code": "000001.XSHG",
+                "day": days,
+                "turnover_ratio": 1.2,
+                "circulating_market_cap": 500000.0,
+                "market_cap": 600000.0,
+                "pe_ratio": 16.0,
+                "pb_ratio": 1.4,
+            }) if len(days) else pd.DataFrame()
         elif "get_price([" in code:  # 批量: 长表 (time, code, ...)
             codes = re.findall(r"'(\d{6}\.XSH[EG])'", code.split("get_price([")[1])
             frames = []
@@ -573,6 +584,47 @@ def test_get_fundamentals_no_report_type_filter(tmp_path: Path):
     dc = DataCache(cache_dir=tmp_path, runner=_FundRunner())
     dc.get_fundamentals("STK_FIN_FORCAST", ["600519.XSHG"], ["type"], "2024-06-30")
     assert "report_type" not in dc.runner.calls[0]
+
+
+# ---- get_index_valuation ------------------------------------------------
+
+
+def test_get_index_valuation_returns_day_index(dc: DataCache):
+    df = dc.get_index_valuation("000001.XSHG", "2024-01-01", "2024-01-31")
+    assert isinstance(df.index, pd.DatetimeIndex)
+    assert "turnover_ratio" in df.columns
+    assert df["turnover_ratio"].iloc[0] == pytest.approx(1.2)
+
+
+def test_get_index_valuation_cache_hit(dc: DataCache):
+    args = ("000001.XSHG", "2024-01-01", "2024-01-31")
+    dc.get_index_valuation(*args)
+    n = dc.runner.fetch_count
+    dc.get_index_valuation(*args)
+    assert dc.runner.fetch_count == n
+
+
+def test_get_index_valuation_fields_slice(dc: DataCache):
+    df = dc.get_index_valuation(
+        "000001.XSHG", "2024-01-01", "2024-01-31",
+        fields=["turnover_ratio", "pe_ratio"],
+    )
+    assert list(df.columns) == ["turnover_ratio", "pe_ratio"]
+
+
+def test_get_index_valuation_rejects_list(dc: DataCache):
+    with pytest.raises(TypeError, match="只接单只"):
+        dc.get_index_valuation(
+            ["000001.XSHG", "399001.XSHE"], "2024-01-01", "2024-01-31"
+        )
+
+
+def test_get_index_valuation_missing_field_raises(dc: DataCache):
+    with pytest.raises(ValueError, match="请求的字段不存在"):
+        dc.get_index_valuation(
+            "000001.XSHG", "2024-01-01", "2024-01-31",
+            fields=["pcf_ratio2"],
+        )
 
 
 # ---- get_valuation_batch ------------------------------------------------

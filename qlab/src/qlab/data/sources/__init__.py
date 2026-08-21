@@ -4,11 +4,21 @@
 
 - :class:`FakeDataSource`：合成数据（测试/开发用，无外部依赖）
 - :class:`JQDataSource`：聚宽 JoinQuant（需 ``pip install -e ./jq``）
+- :class:`FuyaoDataSource`：同花顺扶摇 REST（需环境变量 ``FUYAO_API_KEY``）
 
 ``JQDataSource`` 延迟导入：未安装 jq 连接器时仍可正常使用 ``FakeDataSource``。
 """
 
 from qlab.data.sources.fake import FakeDataSource
+from qlab.data.sources.fuyao import FuyaoAPIError, FuyaoClient, FuyaoDataSource
 from qlab.data.sources.jq_source import JQDataSource, to_jq_code, to_qlab_symbol
 
-__all__ = ["FakeDataSource", "JQDataSource", "to_jq_code", "to_qlab_symbol"]
+__all__ = [
+    "FakeDataSource",
+    "FuyaoAPIError",
+    "FuyaoClient",
+    "FuyaoDataSource",
+    "JQDataSource",
+    "to_jq_code",
+    "to_qlab_symbol",
+]

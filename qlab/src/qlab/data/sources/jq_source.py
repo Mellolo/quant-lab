@@ -73,6 +73,8 @@ def to_jq_code(symbol: str) -> str:
     code, _, ex = symbol.partition(".")
     if ex in _EX_JQ_TO_QLAB:  # 已是聚宽后缀
         return symbol
+    if ex.upper() in {"CSI", "SI"}:  # 中证 / 申万行业指数
+        return f"{code}.{ex.upper()}"
     if ex.upper() == "BJ":
         raise ValueError(
             f"不支持北交所标的: {symbol!r}。\n"
@@ -84,7 +86,8 @@ def to_jq_code(symbol: str) -> str:
         return f"{code}.{_EX_QLAB_TO_JQ[ex.upper()]}"
     except KeyError:
         raise ValueError(
-            f"无法识别的交易所后缀: {symbol!r}（支持 .SH/.SZ 与 .XSHG/.XSHE）"
+            f"无法识别的交易所后缀: {symbol!r}"
+            "（支持 .SH/.SZ/.XSHG/.XSHE，以及指数 .CSI/.SI）"
         ) from None
 
 
@@ -93,10 +96,14 @@ def to_qlab_symbol(code: str) -> str:
     num, _, ex = code.partition(".")
     if ex in _EX_QLAB_TO_JQ:  # 已是 qlab 后缀
         return code
+    if ex.upper() in {"CSI", "SI"}:
+        return f"{num}.{ex.upper()}"
     try:
         return f"{num}.{_EX_JQ_TO_QLAB[ex.upper()]}"
     except KeyError:
-        raise ValueError(f"无法识别的聚宽后缀: {code!r}（支持 .XSHG/.XSHE）") from None
+        raise ValueError(
+            f"无法识别的聚宽后缀: {code!r}（支持 .XSHG/.XSHE/.CSI/.SI）"
+        ) from None
 
 
 def _is_stock_symbol(symbol: str) -> bool:
@@ -702,6 +709,41 @@ class JQDataSource:
             }
         )
         return out.reset_index(drop=True)
+
+    def fetch_index_valuation(
+        self, symbol: str, start: pd.Timestamp, end: pd.Timestamp
+    ) -> pd.DataFrame:
+        """指数/行业市值表. 返回 IndexValuation schema, index=date.
+
+        聚宽 ``turnover_ratio`` 是百分数、市值是亿元；此处换成小数与元。
+        成交额 = 换手 × 流通市值，不把个股加总。
+        """
+        s, e = str(pd.Timestamp(start).date()), str(pd.Timestamp(end).date())
+        jq_code = to_jq_code(symbol)
+        raw = self.cache.get_index_valuation(jq_code, s, e)
+        empty = pd.DataFrame(
+            columns=["symbol", "turnover", "circulating_mcap", "amount", "market_cap"]
+        )
+        empty.index.name = "date"
+        if not isinstance(raw, pd.DataFrame) or len(raw) == 0:
+            return empty
+        idx = pd.DatetimeIndex(raw.index).normalize()
+        to = raw["turnover_ratio"].astype("float64") / 100.0
+        mcap = raw["circulating_market_cap"].astype("float64") * 1e8
+        codes = raw["code"] if "code" in raw.columns else pd.Series(jq_code, index=raw.index)
+        out = pd.DataFrame(
+            {
+                "symbol": [to_qlab_symbol(str(c)) for c in codes],
+                "turnover": to.to_numpy(),
+                "circulating_mcap": mcap.to_numpy(),
+                "amount": (to * mcap).to_numpy(),
+            },
+            index=idx,
+        )
+        out.index.name = "date"
+        if "market_cap" in raw.columns:
+            out["market_cap"] = raw["market_cap"].astype("float64").to_numpy() * 1e8
+        return out
 
     def fetch_status_overrides(
         self, symbols: list[str], start: pd.Timestamp, end: pd.Timestamp

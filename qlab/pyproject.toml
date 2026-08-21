@@ -55,8 +55,9 @@ pythonpath = ["src"]
 python_files = ["test_*.py"]
 markers = [
     "realdata: 需要真实聚宽数据源(网络+凭证)的回归测试。默认跳过, 用 -m realdata 开启。",
+    "fuyao: 需要扶摇 API Key(网络+FUYAO_API_KEY)的回归测试。默认跳过, 用 -m fuyao 开启。",
 ]
-addopts = "-m 'not realdata'"
+addopts = "-m 'not realdata and not fuyao'"
 
 [tool.importlinter]
 root_packages = ["qlab"]
@@ -69,7 +70,7 @@ layers = [
     "qlab.models",
     "qlab.weights",
     "qlab.labeling",
-    "qlab.features | qlab.review",
+    "qlab.features",
     "qlab.data",
     "qlab.core",
 ]

@@ -92,6 +92,15 @@ _BAR_FIELDS_AGG_MINUTE = ["open", "close", "high", "low", "volume", "money"]
 #: 不受字段限制的频率(可取全 12 字段, 含 factor)
 _FULL_FIELD_FREQS = frozenset({"daily", "1m", "1d", "day", "minute"})
 
+#: ``get_index_valuation`` 默认字段. 不含 ``pcf_ratio2``(个股表同坑);
+#: 多了指数表才稳的 ``dividend_ratio`` / ``free_*`` / ``a_*``.
+_INDEX_VALUATION_FIELDS = [
+    "code", "day", "capitalization", "circulating_cap",
+    "market_cap", "circulating_market_cap", "turnover_ratio",
+    "pe_ratio", "pe_ratio_lyr", "pb_ratio", "ps_ratio", "pcf_ratio",
+    "dividend_ratio", "free_cap", "free_market_cap", "a_cap", "a_market_cap",
+]
+
 #: 聚宽 ``get_fundamentals_continuously`` 的硬性返回行数上限。
 #: 超出**静默截断不报错**(实测 100只×242日 理论 24200 行 → 只返 10000 行),
 #: 故批量估值必须按此分块并校验行数。
@@ -714,6 +723,45 @@ class DataCache:
             end_date,
             call_builder=lambda sec, s, e: (
                 f"get_valuation({sec!r}, start_date={s!r}, end_date={e!r}, "
+                f"fields={safe!r})"
+            ),
+            date_col="day",
+        )
+        return self._check_fields(df, fields)
+
+    def get_index_valuation(
+        self,
+        security: str,
+        start_date: object,
+        end_date: object,
+        *,
+        fields: list[str] | None = None,
+    ) -> pd.DataFrame:
+        """缓存版 ``get_index_valuation``(指数/一级行业市值表).
+
+        日期列名为 ``day``. 无覆盖的指数(如深证综指、国证A指、
+        ``000985.XSHG``)返回空表, 空月仍落盘以免反复远程.
+
+        Warning:
+            **只接单只代码**。聚宽签名虽叫 ``security_list``, 传 list
+            **只返回第一只且不报错**. 中证全指要用 ``000985.CSI``,
+            不是 ``000985.XSHG``.
+        """
+        if isinstance(security, (list, tuple, set)):
+            raise TypeError(
+                f"get_index_valuation 只接单只指数/行业代码, 传入了 "
+                f"{type(security).__name__}(长度 {len(security)})。\n"
+                "  原因: 聚宽传 list 只返回第一只且不报错, 会悄悄丢其余标的。\n"
+                "  出路: 逐只循环调用。"
+            )
+        safe = list(_INDEX_VALUATION_FIELDS)
+        df = self._monthly_query(
+            "get_index_valuation",
+            security,
+            start_date,
+            end_date,
+            call_builder=lambda sec, s, e: (
+                f"get_index_valuation({sec!r}, start_date={s!r}, end_date={e!r}, "
                 f"fields={safe!r})"
             ),
             date_col="day",
